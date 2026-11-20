@@ -297,3 +297,20 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .historial .stat b { display: block; font-size: 22px; }
 .historial .stat span { font-size: 13px; color: var(--muted); }
 .link-btn { border: 0; background: none; padding: 6px 0 0; color: var(--primary); font-weight: 600; font-size: 14px; cursor: pointer; text-align: left; }
+
+/* ---------- Cierre y estadísticas ---------- */
+.aviso-banner.cierre { border-color: var(--realizada); background: var(--realizada-bg); }
+.info-teatro { font-size: 14px; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; margin: -4px 0 14px; }
+.info-teatro:empty { display: none; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.tile b { display: block; font-size: 26px; line-height: 1.1; }
+.tile span { font-size: 13px; color: var(--muted); }
+.barras { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.barra-fila { display: grid; grid-template-columns: minmax(0, 38%) 1fr auto; align-items: center; gap: 10px; padding: 6px 0; }
+.barra-nombre { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra-nombre span { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+.barra-pista { height: 12px; }
+.barra-valor { height: 100%; background: var(--primary); border-radius: 0 4px 4px 0; }
+.barra-num { font-size: 14px; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+.tabbar button { font-size: 11px; }

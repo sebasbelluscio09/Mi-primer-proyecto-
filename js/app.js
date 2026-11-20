@@ -56,6 +56,8 @@
     encodeURIComponent([t.nombre, t.direccion, t.ciudad, t.provincia, 'Argentina'].filter(Boolean).join(', '));
   const ordenFunciones = (a, b) => (a.fecha + (a.hora || '')).localeCompare(b.fecha + (b.hora || ''));
   const capitalizar = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  // Público de una función: asistentes reales si se cargaron, si no las entradas vendidas.
+  const publico = (f) => (f.asistentes != null ? f.asistentes : f.entradas_vendidas);
 
   function distanciaKm([la1, lo1], [la2, lo2]) {
     const r = Math.PI / 180;
@@ -137,6 +139,7 @@
     buscaTeatro: '',
     provTeatro: '',
     mapaRango: 'proximas',
+    statsAnio: 'todos',
     modalFuncionId: null,
   };
   let canal = null;
@@ -292,6 +295,7 @@
     const tabs = [
       { id: 'calendario', label: 'Calendario', ico: '📅' },
       { id: 'mapa', label: 'Mapa', ico: '🗺️' },
+      { id: 'estadisticas', label: 'Números', ico: '📊' },
     ];
     if (state.isAdmin) tabs.push({ id: 'teatros', label: 'Teatros', ico: '🎭' });
     tabs.push({ id: 'cuenta', label: 'Cuenta', ico: '👤' });
@@ -321,6 +325,8 @@
       if (state.isAdmin) fab = '<button class="fab" data-action="nuevaFuncion">+ Función</button>';
     } else if (state.vista === 'mapa') {
       html = vistaMapa();
+    } else if (state.vista === 'estadisticas') {
+      html = vistaEstadisticas();
     } else if (state.vista === 'teatros') {
       html = vistaTeatros();
       fab = '<button class="fab" data-action="nuevoTeatro">+ Teatro</button>';
@@ -341,12 +347,78 @@
       ⚠️ ${av.length} aviso${av.length > 1 ? 's' : ''} en la gira <span>Ver ›</span></button>`;
   }
 
+  // ---------- Cierre de funciones ----------
+  const pendientesCierre = () => state.funciones
+    .filter((f) => f.estado === 'confirmada' && f.fecha < hoyISO()).sort(ordenFunciones);
+
+  function bannerCierre() {
+    if (!state.isAdmin) return '';
+    const p = pendientesCierre();
+    if (!p.length) return '';
+    return `<button class="aviso-banner cierre" data-action="verPendientes">
+      🎬 ${p.length === 1 ? 'Tenés 1 función para cerrar' : `Tenés ${p.length} funciones para cerrar`} <span>Cargar público ›</span></button>`;
+  }
+
+  function verPendientes() {
+    const p = pendientesCierre();
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>Funciones para cerrar</h2><div class="sub">Ya pasaron: cargá cuánta gente vino</div></div>
+        <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      ${p.length ? `<div class="lista">${p.map((f) => `
+        <button class="card" data-action="cerrarFuncion" data-id="${f.id}">
+          <div class="card-body"><div class="card-title">${esc(f.ciudad)}</div>
+          <div class="card-sub">${esc(capitalizar(fechaLarga(f.fecha)))}</div></div>
+          <span class="badge est-realizada">Cerrar ›</span></button>`).join('')}</div>`
+        : '<div class="vacio-msg">No hay funciones pendientes de cierre.</div>'}`);
+  }
+
+  function formCierre(id) {
+    const f = state.funciones.find((x) => x.id === id);
+    if (!f) return;
+    const t = teatroDe(f.teatro_id);
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>🎬 Cierre de función</h2><div class="sub">${esc(f.ciudad)}${t ? ` · ${esc(t.nombre)}` : ''} · ${esc(fechaCorta(f.fecha))}</div></div>
+        <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <form data-form="cierre" data-id="${f.id}" novalidate>
+        <label class="campo"><span>Personas que vinieron *</span><input type="number" name="asistentes" min="0" inputmode="numeric"
+          value="${esc(f.asistentes ?? f.entradas_vendidas)}" placeholder="Ej: 950" required></label>
+        ${t && t.capacidad ? `<p class="small muted" style="margin-top:-8px">Capacidad de la sala: ${numero(t.capacidad)}</p>` : ''}
+        <div class="fila-2">
+          <label class="campo"><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0" inputmode="numeric" value="${esc(f.entradas_vendidas)}"></label>
+          <label class="campo"><span>Invitaciones</span><input type="number" name="invitaciones" min="0" inputmode="numeric" value="${esc(f.invitaciones)}"></label>
+        </div>
+        <label class="campo"><span>¿Cómo fue?</span><textarea name="comentario_cierre"
+          placeholder="Ej: sala muy cálida, buen sonido; el camarín era chico">${esc(f.comentario_cierre)}</textarea></label>
+        <p class="small muted">Al guardar, la función queda como <b>Realizada</b> y suma al historial del teatro.</p>
+        <p class="error" id="form-error" hidden></p>
+        <button class="btn primario bloque" type="submit">Guardar cierre</button>
+      </form>`);
+  }
+
+  async function guardarCierre(form) {
+    const fd = new FormData(form);
+    const n = (k) => { const v = String(fd.get(k) || '').trim(); return v === '' ? null : parseInt(v, 10); };
+    const datos = {
+      asistentes: n('asistentes'), entradas_vendidas: n('entradas_vendidas'), invitaciones: n('invitaciones'),
+      comentario_cierre: String(fd.get('comentario_cierre') || '').trim() || null, estado: 'realizada',
+    };
+    if (datos.asistentes == null) return errorForm('Cargá cuántas personas vinieron.');
+    if ([datos.asistentes, datos.entradas_vendidas, datos.invitaciones].some((v) => v != null && (isNaN(v) || v < 0))) {
+      return errorForm('Los números no pueden ser negativos.');
+    }
+    await guardar(form, sb.from('funciones').update(datos).eq('id', form.dataset.id));
+  }
+
   function vistaCalendario() {
     const seg = `<div class="segmented" role="tablist">
       <button data-action="calModo" data-modo="mes" class="${state.calModo === 'mes' ? 'activo' : ''}">Mes</button>
       <button data-action="calModo" data-modo="lista" class="${state.calModo === 'lista' ? 'activo' : ''}">Lista</button>
     </div>`;
-    return seg + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
+    return seg + bannerCierre() + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
   }
 
   function leyenda() {
@@ -440,7 +512,7 @@
     const d = aFecha(f.fecha);
     const t = teatroDe(f.teatro_id);
     const partes = [t ? t.nombre : 'Teatro a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`];
-    if (conPublico && f.entradas_vendidas != null) partes.push(`${numero(f.entradas_vendidas)} personas`);
+    if (conPublico && publico(f) != null) partes.push(`${numero(publico(f))} personas`);
     const aviso = state.avisosPorFuncion[f.id] ? '<span class="marca-aviso" title="Tiene avisos">⚠️</span> ' : '';
     return `<button class="card funcion est-${f.estado}" data-action="verFuncion" data-id="${f.id}">
       <div class="fecha-box">
@@ -514,6 +586,10 @@
         ${f.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(f.notas)}</div></div>` : ''}
       </div>
 
+      ${state.isAdmin && f.estado === 'confirmada' && f.fecha < hoyISO()
+        ? `<button class="btn primario bloque" data-action="cerrarFuncion" data-id="${f.id}" style="margin-bottom:14px">🎬 Cerrar función: cargar cuánta gente vino</button>` : ''}
+      ${f.estado === 'realizada' ? `<h3 class="sub-titulo">🎬 Cómo fue</h3>${cierreHtml(f, t)}` : ''}
+
       <h3 class="sub-titulo">🎟️ Entradas</h3>
       ${entradasHtml(f, t)}
 
@@ -532,6 +608,20 @@
         <button class="btn peligro" data-action="borrarFuncion" data-id="${f.id}">Borrar</button>
       </div>` : ''}`);
     cargarDocs(f.id);
+  }
+
+  function cierreHtml(f, t) {
+    if (f.asistentes == null && !f.comentario_cierre) {
+      return `<div class="vacio-msg chico">Sin datos de cierre.${state.isAdmin
+        ? ` <button class="link-btn" data-action="cerrarFuncion" data-id="${f.id}">Cargarlos</button>` : ''}</div>`;
+    }
+    const cap = t && t.capacidad;
+    return `<div class="datos">
+      ${f.asistentes != null ? `<div class="dato"><div class="k">Vinieron</div><div class="v"><b>${numero(f.asistentes)}</b> personas${cap ? ` · ${Math.round(f.asistentes * 100 / cap)}% de la sala` : ''}</div></div>` : ''}
+      ${f.invitaciones != null ? `<div class="dato"><div class="k">Invitaciones</div><div class="v">${numero(f.invitaciones)}</div></div>` : ''}
+      ${f.comentario_cierre ? `<div class="dato"><div class="k">Comentario</div><div class="v multilinea">${esc(f.comentario_cierre)}</div></div>` : ''}
+      ${state.isAdmin ? `<div class="dato"><div class="v"><button class="link-btn" data-action="cerrarFuncion" data-id="${f.id}">✏️ Editar cierre</button></div></div>` : ''}
+    </div>`;
   }
 
   function entradasHtml(f, t) {
@@ -809,6 +899,7 @@
         </div>
         <label class="campo"><span>Teatro</span>
           <select name="teatro_id" data-change="teatroFuncion">${opcionesTeatros(f.teatro_id)}</select></label>
+        <div id="info-teatro">${infoTeatroHtml(f.teatro_id, f.id)}</div>
         <label class="campo"><span>Ciudad *</span><input name="ciudad" value="${esc(f.ciudad)}" required
           placeholder="Se completa sola al elegir teatro"></label>
         <label class="campo"><span>Estado</span>
@@ -971,6 +1062,86 @@
     else if (puntos.length > 1) mapa.fitBounds(puntos, { padding: [30, 30] });
   }
 
+  // ---------- Estadísticas ----------
+  function barras(filas, { pct = false } = {}) {
+    if (!filas.length) return '<div class="vacio-msg chico">Sin datos todavía.</div>';
+    const max = Math.max(...filas.map((f) => f.valor), 1);
+    return `<div class="barras">${filas.map((f) => `
+      <div class="barra-fila" title="${esc(f.nombre)}: ${pct ? f.valor + '%' : numero(f.valor)}">
+        <div class="barra-nombre">${esc(f.nombre)}${f.sub ? `<span>${esc(f.sub)}</span>` : ''}</div>
+        <div class="barra-pista"><div class="barra-valor" style="width:${Math.max(2, f.valor * 100 / (pct ? Math.max(100, max) : max))}%"></div></div>
+        <div class="barra-num">${pct ? f.valor + '%' : numero(f.valor)}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  function vistaEstadisticas() {
+    const anios = [...new Set(state.funciones.filter((f) => f.estado === 'realizada').map((f) => f.fecha.slice(0, 4)))].sort().reverse();
+    if (state.statsAnio !== 'todos' && !anios.includes(state.statsAnio)) state.statsAnio = 'todos';
+    const enRango = (f) => state.statsAnio === 'todos' || f.fecha.startsWith(state.statsAnio);
+    const hechas = state.funciones.filter((f) => f.estado === 'realizada' && enRango(f));
+    const conPub = hechas.filter((f) => publico(f) != null);
+    const total = conPub.reduce((a, f) => a + publico(f), 0);
+    const ocup = conPub.map((f) => { const t = teatroDe(f.teatro_id); return t && t.capacidad ? publico(f) / t.capacidad : null; })
+      .filter((x) => x != null);
+    const ocupProm = ocup.length ? Math.round(ocup.reduce((a, b) => a + b, 0) * 100 / ocup.length) : null;
+    const proximas = state.funciones.filter((f) => f.estado === 'confirmada' && f.fecha >= hoyISO()).length;
+    const opciones = state.funciones.filter((f) => f.estado === 'opcion' && f.fecha >= hoyISO()).length;
+
+    // Por provincia
+    const porProv = {};
+    conPub.forEach((f) => {
+      const prov = teatroDe(f.teatro_id)?.provincia || 'Sin teatro';
+      porProv[prov] = porProv[prov] || { valor: 0, n: 0 };
+      porProv[prov].valor += publico(f); porProv[prov].n += 1;
+    });
+    const filasProv = Object.entries(porProv).sort((a, b) => b[1].valor - a[1].valor)
+      .map(([nombre, d]) => ({ nombre, valor: d.valor, sub: `${d.n} función(es)` }));
+
+    // Teatros por ocupación
+    const porTeatro = {};
+    conPub.forEach((f) => {
+      const t = teatroDe(f.teatro_id);
+      if (!t || !t.capacidad) return;
+      porTeatro[t.id] = porTeatro[t.id] || { t, suma: 0, n: 0 };
+      porTeatro[t.id].suma += publico(f) / t.capacidad; porTeatro[t.id].n += 1;
+    });
+    const filasTeatro = Object.values(porTeatro)
+      .map((d) => ({ nombre: d.t.nombre, sub: `${d.t.ciudad} · ${d.n} función(es)`, valor: Math.round(d.suma * 100 / d.n) }))
+      .sort((a, b) => b.valor - a.valor).slice(0, 8);
+
+    // Por mes
+    const porMes = {};
+    conPub.forEach((f) => { const k = f.fecha.slice(0, 7); porMes[k] = (porMes[k] || 0) + publico(f); });
+    const filasMes = Object.keys(porMes).sort().map((k) => {
+      const [y, m] = k.split('-').map(Number);
+      return { nombre: `${capitalizar(MESES[m - 1].slice(0, 3))} ${y}`, valor: porMes[k] };
+    });
+
+    return `
+      <div class="filtros">
+        <select data-change="statsAnio" aria-label="Año">
+          <option value="todos">Todos los años</option>
+          ${anios.map((a) => `<option ${state.statsAnio === a ? 'selected' : ''}>${a}</option>`).join('')}
+        </select>
+      </div>
+      <div class="tiles">
+        <div class="tile"><b>${numero(hechas.length)}</b><span>funciones realizadas</span></div>
+        <div class="tile"><b>${numero(total)}</b><span>personas en total</span></div>
+        <div class="tile"><b>${conPub.length ? numero(Math.round(total / conPub.length)) : '—'}</b><span>promedio por función</span></div>
+        <div class="tile"><b>${ocupProm != null ? ocupProm + '%' : '—'}</b><span>ocupación promedio</span></div>
+      </div>
+      <p class="small muted">Próximamente: ${proximas} confirmada(s) y ${opciones} opción(es).
+        ${hechas.length > conPub.length ? ` · ${hechas.length - conPub.length} función(es) realizada(s) sin público cargado.` : ''}</p>
+      <div class="seccion-titulo">Público por provincia</div>
+      ${barras(filasProv)}
+      <div class="seccion-titulo">Teatros con mejor ocupación</div>
+      ${barras(filasTeatro, { pct: true })}
+      <div class="seccion-titulo">Público por mes</div>
+      ${barras(filasMes)}
+      ${!hechas.length ? `<div class="vacio-msg" style="margin-top:14px">Las estadísticas se arman con las funciones <b>Realizadas</b>.
+        Después de cada show usá “🎬 Cerrar función” para cargar cuánta gente vino.</div>` : ''}`;
+  }
+
   // ---------- Teatros ----------
   function teatrosFiltrados() {
     const q = normalizar(state.buscaTeatro);
@@ -1008,21 +1179,49 @@
       }).join('')}</div>`;
   }
 
+  function resumenTeatro(t, fs) {
+    const hechas = fs.filter((f) => f.estado === 'realizada').sort(ordenFunciones);
+    const conPublico = hechas.filter((f) => publico(f) != null);
+    const total = conPublico.reduce((acc, f) => acc + publico(f), 0);
+    const prom = conPublico.length ? Math.round(total / conPublico.length) : null;
+    return {
+      hechas, conPublico, total, prom,
+      mejor: conPublico.length ? Math.max(...conPublico.map(publico)) : null,
+      ultima: hechas[hechas.length - 1] || null,
+      pct: prom != null && t.capacidad ? Math.round(prom * 100 / t.capacidad) : null,
+    };
+  }
+
   function historialHtml(t, fs) {
-    const hechas = fs.filter((f) => f.estado === 'realizada');
-    const conPublico = hechas.filter((f) => f.entradas_vendidas != null);
-    if (!hechas.length) return '';
-    let html = `<div class="panel historial"><div class="stat"><b>${hechas.length}</b><span>${hechas.length > 1 ? 'veces' : 'vez'} que fuimos</span></div>`;
-    if (conPublico.length) {
-      const total = conPublico.reduce((s, f) => s + f.entradas_vendidas, 0);
-      const prom = Math.round(total / conPublico.length);
-      const mejor = Math.max(...conPublico.map((f) => f.entradas_vendidas));
-      html += `<div class="stat"><b>${numero(prom)}</b><span>personas promedio${t.capacidad ? ` (${Math.round(prom * 100 / t.capacidad)}%)` : ''}</span></div>
-        <div class="stat"><b>${numero(mejor)}</b><span>mejor función</span></div>
-        <div class="stat"><b>${numero(total)}</b><span>personas en total</span></div>`;
+    const r = resumenTeatro(t, fs);
+    if (!r.hechas.length) return '';
+    let html = `<div class="panel historial"><div class="stat"><b>${r.hechas.length}</b><span>${r.hechas.length > 1 ? 'veces' : 'vez'} que fuimos</span></div>`;
+    if (r.conPublico.length) {
+      html += `<div class="stat"><b>${numero(r.prom)}</b><span>personas promedio${r.pct != null ? ` (${r.pct}%)` : ''}</span></div>
+        <div class="stat"><b>${numero(r.mejor)}</b><span>mejor función</span></div>
+        <div class="stat"><b>${numero(r.total)}</b><span>personas en total</span></div>`;
     }
-    const ultima = hechas[hechas.length - 1];
-    return html + `</div><p class="small muted">Última vez: ${esc(fechaLarga(ultima.fecha))}</p>`;
+    return html + `</div><p class="small muted">Última vez: ${esc(fechaLarga(r.ultima.fecha))}</p>`;
+  }
+
+  // Resumen corto que se muestra al programar una función en ese teatro.
+  function infoTeatroHtml(teatroId, excluirId) {
+    const t = teatroDe(teatroId);
+    if (!t) return '';
+    const fs = state.funciones.filter((f) => f.teatro_id === t.id && f.id !== excluirId);
+    const r = resumenTeatro(t, fs);
+    const prox = fs.filter((f) => f.estado !== 'cancelada' && f.fecha >= hoyISO()).length;
+    let txt;
+    if (!r.hechas.length) txt = 'Primera vez en este teatro (no hay funciones realizadas cargadas).';
+    else {
+      const u = r.ultima;
+      txt = `Fueron ${r.hechas.length} ${r.hechas.length > 1 ? 'veces' : 'vez'}. Última: ${fechaCorta(u.fecha)} ${u.fecha.slice(0, 4)}` +
+        (publico(u) != null ? ` — vinieron <b>${numero(publico(u))}</b> personas${t.capacidad ? ` (${Math.round(publico(u) * 100 / t.capacidad)}%)` : ''}` : '') + '.' +
+        (r.conPublico.length > 1 ? ` Promedio: ${numero(r.prom)} personas.` : '');
+    }
+    if (prox) txt += ` Ya hay ${prox} función(es) programada(s) ahí.`;
+    if (t.catering) txt += ` Catering: ${CATERING[t.catering].replace(/^\S+ /, '').toLowerCase()}.`;
+    return `<div class="info-teatro">📈 ${txt}</div>`;
   }
 
   function verTeatro(id) {
@@ -1239,6 +1438,8 @@
     irHoy: () => { const t = new Date(); state.mes = { y: t.getFullYear(), m: t.getMonth() }; state.diaSel = hoyISO(); renderMain(); },
     dia: (el) => { state.diaSel = state.diaSel === el.dataset.dia ? null : el.dataset.dia; renderMain(); },
     verAvisos: () => verAvisos(),
+    verPendientes: () => verPendientes(),
+    cerrarFuncion: (el) => formCierre(el.dataset.id),
     verFuncion: (el, e) => { e.preventDefault(); verFuncion(el.dataset.id); },
     volverFuncion: (el) => verFuncion(el.dataset.id),
     nuevaFuncion: () => formFuncion(null),
@@ -1289,11 +1490,14 @@
     if (!k) return;
     if (k === 'filtroEstado') { state.filtroEstado = e.target.value; renderMain(); }
     if (k === 'verPasadas') { state.verPasadas = e.target.checked; renderMain(); }
+    if (k === 'statsAnio') { state.statsAnio = e.target.value; renderMain(); }
     if (k === 'mapaRango') { state.mapaRango = e.target.value; renderMain(); }
     if (k === 'provTeatro') { state.provTeatro = e.target.value; document.getElementById('lista-teatros').innerHTML = listaTeatros(); }
     if (k === 'teatroFuncion') {
       const t = teatroDe(e.target.value);
       if (t) e.target.form.elements.ciudad.value = t.ciudad;
+      const $i = document.getElementById('info-teatro');
+      if ($i) $i.innerHTML = infoTeatroHtml(e.target.value, e.target.form.dataset.id);
     }
     if (k === 'checkItem') {
       const f = state.funciones.find((x) => x.id === state.modalFuncionId);
@@ -1328,6 +1532,8 @@
         if (error) renderLogin(traducirError(error));
       } else if (tipo === 'funcion') {
         await guardarFuncion(form);
+      } else if (tipo === 'cierre') {
+        await guardarCierre(form);
       } else if (tipo === 'teatro') {
         await guardarTeatro(form);
       } else if (tipo === 'checkNuevo') {

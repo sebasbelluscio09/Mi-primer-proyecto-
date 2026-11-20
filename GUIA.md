@@ -35,6 +35,11 @@ Agrega logística, checklist, entradas, ubicaciones para el mapa y el espacio pa
 2. En Supabase → **SQL Editor** → hoja nueva → pegar → **Run** → **Run query**.
 3. Tiene que decir **Success**. Se puede ejecutar más de una vez sin problema.
 
+## Paso 2.7 · Actualización para cierre de funciones (versión 3)
+
+Agrega asistentes, invitaciones y comentario de cierre.
+Igual que antes: copiá [`supabase/actualizacion-3.sql`](supabase/actualizacion-3.sql), pegalo en una hoja nueva del SQL Editor y tocá **Run**.
+
 ## Paso 3 · Crear los usuarios (vos y tu equipo)
 
 1. Menú izquierdo → **Authentication** → **Users** → botón **Add user** → **Create new user**.
