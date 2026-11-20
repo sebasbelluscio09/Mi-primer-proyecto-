@@ -17,7 +17,7 @@ Tiempo total: unos 15 minutos. No hace falta saber programar.
 
 1. En el menú de la izquierda entrá a **SQL Editor** (ícono de terminal `>_`).
 2. Tocá **New query** (o el **+**).
-3. Abrí el archivo [`supabase/instalacion.sql`](supabase/instalacion.sql) de este repositorio, tocá el botón de **copiar** (arriba a la derecha del archivo) y pegalo en Supabase.
+3. Abrí el archivo [`supabase/instalar.sql`](supabase/instalar.sql) (misma instalación, sin comentarios: más segura para pegar desde el celular) de este repositorio, tocá el botón de **copiar** (arriba a la derecha del archivo) y pegalo en Supabase.
 4. Tocá **Run** (abajo a la derecha). Si aparece un aviso sobre "operaciones destructivas", confirmá. Tiene que decir **Success**.
 5. Borrá todo lo que hay en el editor, pegá esta línea **cambiando el email por el tuyo**, y tocá **Run**:
 
