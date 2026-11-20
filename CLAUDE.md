@@ -31,7 +31,7 @@ Desde el contenedor de Claude **no hay acceso de red a Supabase** (proxy 403): n
 - `@supabase/supabase-js@2.117.3` (UMD desde jsDelivr). Leaflet 1.9.4 desde unpkg (se carga solo al abrir el Mapa). Mapas de OpenStreetMap. Geocodificación con Nominatim (solo al guardar teatros).
 - Ingreso con **email + contraseña** (no magic link: el SMTP gratuito de Supabase no manda a externos). El admin crea usuarios en Supabase → Add user → "Auto Confirm User". **Registro público desactivado** ("Allow new users to sign up" apagado).
 - Roles: tabla `admins(email)` + función `es_admin()`. Todo usuario logueado lee; solo admin escribe (RLS en todas las tablas).
-- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=7`).
+- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=8`).
 
 ### Base de datos (Supabase)
 
@@ -60,6 +60,7 @@ Reglas para SQL nuevo:
 - Pestaña **Números**: público total, promedio, ocupación, por provincia, por mes, mejores teatros.
 - **Recaudación / gastos / neto** solo para el admin (en función, cierre y Números). Nunca va en WhatsApp ni en el .ics.
 - **Eventos privados** (empresas, fiestas, festivales, municipios): en el formulario se elige 🎭 Teatro / 🎤 Evento privado; en Calendario hay un tercer botón "🎤 Privados" con su lista y botón "+ Privado". En privados, "Recaudación" se llama **Cachet** (misma tabla `finanzas`), no hay sección Entradas y el cierre no exige asistentes. Se marcan con 🎤 en calendario, tarjetas, WhatsApp y .ics.
+- **Sin internet**: `sw.js` (service worker) guarda la app y las librerías (red primero para archivos propios, cache primero para CDNs y mosaicos del mapa; nunca intercepta Supabase). La app guarda una copia de los datos en `localStorage` (`gira-copia-v1`) en cada carga exitosa; sin red la usa en modo **solo lectura** con una barra "📴 Sin conexión". Todo guardado/borrado pasa por `sinConexion()`. Al cerrar sesión se borra la copia. Si cambiás la lista de archivos de la app, subí `VERSION` en `sw.js`.
 - **Recordatorios** (solo admin): funciones de los próximos 7 días con algo pendiente.
 - El equipo (no admin) ve calendario, mapa, números y detalle de funciones en modo lectura; no ve Teatros, recaudación ni recordatorios.
 
@@ -76,7 +77,7 @@ Reglas para SQL nuevo:
 - Contactos por función (productor local, técnico) además del contacto del teatro.
 - Presupuesto de gira por tramo (micro, avión, hotel) y comparación con lo recaudado.
 - Plantillas de checklist distintas por tipo de sala.
-- Funcionar sin conexión (service worker) para teatros con mala señal.
+- Cola de cambios sin conexión (hoy sin señal es solo lectura).
 - Exportar estadísticas a planilla (CSV/Excel).
 - Verificar los 57 teatros iniciales (capacidades aproximadas, faltan contactos).
 - Mantenimiento: si pasan 7 días sin uso, Supabase pausa el proyecto (se reactiva con "Restore project").

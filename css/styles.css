@@ -330,3 +330,9 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .tipo-sel label:has(input:checked) { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .tipo-sel label:has(input:focus-visible) { outline: 2px solid var(--focus); }
 [hidden] { display: none !important; }
+
+/* ---------- Sin conexión ---------- */
+.offline-bar {
+  position: sticky; top: calc(env(safe-area-inset-top) + 52px); z-index: 9;
+  background: #3a3330; color: #fff; font-size: 14px; padding: 9px 16px; text-align: center;
+}

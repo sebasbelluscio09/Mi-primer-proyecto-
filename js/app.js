@@ -127,6 +127,66 @@
 
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e)));
+  }
+
+  // ---------- Copia de los datos para usar sin internet ----------
+  const CLAVE_COPIA = 'gira-copia-v1';
+  const esErrorDeRed = (e) => !navigator.onLine ||
+    /failed to fetch|load failed|network|fetch|timeout|offline/i.test((e && (e.message || e.name)) || String(e));
+
+  function guardarCopia() {
+    try {
+      localStorage.setItem(CLAVE_COPIA, JSON.stringify({
+        guardado: new Date().toISOString(), email: state.user?.email, isAdmin: state.isAdmin,
+        teatros: state.teatros, funciones: state.funciones, finanzas: state.isAdmin ? state.finanzas : {},
+      }));
+    } catch (e) { /* almacenamiento lleno o bloqueado: se sigue sin copia */ }
+  }
+  function leerCopia() {
+    try { return JSON.parse(localStorage.getItem(CLAVE_COPIA) || 'null'); } catch (e) { return null; }
+  }
+  function borrarCopia() {
+    try { localStorage.removeItem(CLAVE_COPIA); } catch (e) { /* nada */ }
+  }
+  // Pasa la app a "modo sin conexión" con la última copia. Devuelve false si no hay copia.
+  function usarCopia(emailEsperado) {
+    const c = leerCopia();
+    if (!c || (emailEsperado && c.email && c.email !== emailEsperado)) return false;
+    state.teatros = c.teatros || []; state.funciones = c.funciones || []; state.finanzas = c.finanzas || {};
+    state.isAdmin = !!c.isAdmin;
+    if (!state.user) state.user = { email: c.email, deCopia: true };
+    state.offline = true; state.copiaGuardada = c.guardado;
+    calcularAvisos();
+    return true;
+  }
+  function sinConexion() {
+    if (navigator.onLine && !state.offline) return false;
+    toast('📴 Sin conexión: los cambios se pueden hacer cuando vuelva la señal.', true);
+    return true;
+  }
+  function barraOffline() {
+    if (!state.offline) return '';
+    const cuando = state.copiaGuardada ? new Date(state.copiaGuardada).toLocaleString('es-AR',
+      { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    return `<div class="offline-bar">📴 Sin conexión · solo lectura${cuando ? ` · datos del ${cuando}` : ''}</div>`;
+  }
+  function actualizarBarraOffline() {
+    const $b = document.getElementById('offline');
+    if ($b) $b.innerHTML = barraOffline();
+  }
+
+  window.addEventListener('offline', () => { if (state.user) { state.offline = true; actualizarBarraOffline(); } });
+  window.addEventListener('online', () => {
+    if (!state.user) return;
+    if (state.user.deCopia) {
+      sb.auth.getSession().then(({ data }) => {
+        if (data.session) { sesionUid = data.session.user.id; manejarSesion(data.session); } else { state.user = null; renderLogin(); }
+      });
+    } else recargarPronto();
+  });
+
   // ---------- Estado ----------
   const ahora = new Date();
   const state = {
@@ -137,6 +197,8 @@
     finanzas: {},
     avisos: [],
     avisosPorFuncion: {},
+    offline: false,
+    copiaGuardada: null,
     vista: 'calendario',
     calModo: 'mes',
     mes: { y: ahora.getFullYear(), m: ahora.getMonth() },
@@ -235,7 +297,14 @@
   function recargarPronto() {
     clearTimeout(recargaTimer);
     recargaTimer = setTimeout(async () => {
-      try { await cargarDatos(); renderMain(); } catch (e) { console.error(e); }
+      try {
+        await cargarDatos(); guardarCopia();
+        if (state.offline) { state.offline = false; actualizarBarraOffline(); }
+        renderMain();
+      } catch (e) {
+        console.error(e);
+        if (esErrorDeRed(e) && !state.offline) { state.offline = true; state.copiaGuardada = leerCopia()?.guardado; actualizarBarraOffline(); }
+      }
     }, 300);
   }
 
@@ -254,6 +323,7 @@
 
   // ---------- Sesión ----------
   let sesionUid;
+  let cerrandoSesion = false;
   sb.auth.onAuthStateChange((_evento, session) => {
     const uid = session?.user?.id ?? null;
     if (uid === sesionUid) return; // solo actuar cuando cambia el usuario
@@ -263,7 +333,8 @@
 
   async function manejarSesion(session) {
     if (!session) {
-      state.user = null; state.isAdmin = false;
+      if (!navigator.onLine && !cerrandoSesion && usarCopia()) { render(); return; }
+      state.user = null; state.isAdmin = false; state.offline = false;
       if (canal) { sb.removeChannel(canal); canal = null; }
       renderLogin();
       return;
@@ -275,10 +346,13 @@
       if (error) throw error;
       state.isAdmin = !!data;
       await cargarDatos();
+      state.offline = false;
+      guardarCopia();
       suscribirTiempoReal();
       render();
     } catch (e) {
       console.error(e);
+      if (esErrorDeRed(e) && usarCopia(session.user.email)) { render(); return; }
       $app.innerHTML = `<div class="login"><div class="login-card">
         <h1>No se pudieron cargar los datos</h1>
         <p class="centro muted">${esc(traducirError(e))}</p>
@@ -326,6 +400,7 @@
         <h1>Agenda de Gira</h1>
         <span class="rol">${state.isAdmin ? 'Administrador' : 'Equipo · solo lectura'}</span>
       </header>
+      <div id="offline">${barraOffline()}</div>
       <main id="main"></main>
       <div id="fab"></div>
       <nav class="tabbar">
@@ -471,6 +546,7 @@
   }
 
   async function guardarCierre(form) {
+    if (sinConexion()) return;
     const fd = new FormData(form);
     const n = (k) => { const v = String(fd.get(k) || '').trim(); return v === '' ? null : parseInt(v, 10); };
     const f = state.funciones.find((x) => x.id === form.dataset.id) || {};
@@ -834,6 +910,7 @@
   async function guardarChecklist(items) {
     const f = state.funciones.find((x) => x.id === state.modalFuncionId);
     if (!f) return;
+    if (sinConexion()) { const $c = document.getElementById('checklist'); if ($c) $c.innerHTML = checklistHtml(f); return; }
     const anterior = f.checklist;
     f.checklist = items;
     const $c = document.getElementById('checklist');
@@ -855,6 +932,10 @@
     if (!$d) return;
     const subir = state.isAdmin ? `<label class="btn bloque subir">📤 Adjuntar contrato o documento
       <input type="file" data-change="subirDoc" multiple hidden></label>` : '';
+    if (state.offline || !navigator.onLine) {
+      $d.innerHTML = '<div class="vacio-msg chico">📴 Los documentos se pueden abrir cuando haya conexión.</div>';
+      return;
+    }
     const { data, error } = await sb.storage.from(BUCKET).list(fid, { sortBy: { column: 'created_at', order: 'desc' } });
     if (state.modalFuncionId !== fid || !document.getElementById('docs')) return;
     if (error) {
@@ -876,6 +957,7 @@
   }
 
   async function subirDocs(input) {
+    if (sinConexion()) { input.value = ''; return; }
     const fid = state.modalFuncionId;
     const archivos = [...input.files];
     if (!fid || !archivos.length) return;
@@ -891,6 +973,7 @@
   }
 
   async function borrarDoc(ruta) {
+    if (sinConexion()) return;
     if (!confirm(`¿Borrar "${nombreVisible(ruta.split('/').pop())}"?`)) return;
     const { error } = await sb.storage.from(BUCKET).remove([ruta]);
     if (error) return toast(traducirError(error), true);
@@ -1155,6 +1238,7 @@
   }
 
   async function borrarFuncion(id) {
+    if (sinConexion()) return;
     const f = state.funciones.find((x) => x.id === id);
     if (!f || !confirm(`¿Borrar ${esPrivado(f) ? 'el evento privado' : 'la función'} de ${f.ciudad} del ${fechaLarga(f.fecha)}?\nEsta acción no se puede deshacer.`)) return;
     const { error } = await sb.from('funciones').delete().eq('id', id);
@@ -1592,6 +1676,7 @@
   }
 
   async function borrarTeatro(id) {
+    if (sinConexion()) return;
     const t = teatroDe(id);
     if (!t) return;
     const n = state.funciones.filter((f) => f.teatro_id === id).length;
@@ -1643,6 +1728,7 @@
     if (el) { el.textContent = msg; el.hidden = false; el.scrollIntoView({ block: 'center' }); } else toast(msg, true);
   }
   async function guardar(form, consulta, despues) {
+    if (sinConexion()) return;
     const btn = form.querySelector('[type=submit]');
     btn.disabled = true; btn.textContent = 'Guardando…';
     const { data, error } = await consulta;
@@ -1701,7 +1787,13 @@
     geocodificar: (el) => geocodificarForm(el),
     cerrar: () => cerrarModal(),
     fondo: (el, e) => { if (e.target === el) cerrarModal(); },
-    salir: async () => { await sb.auth.signOut(); },
+    salir: async () => {
+      cerrandoSesion = true; borrarCopia();
+      await sb.auth.signOut().catch(() => {});
+      state.user = null; state.offline = false; sesionUid = null;
+      cerrandoSesion = false;
+      renderLogin();
+    },
     reintentar: () => { sesionUid = undefined; sb.auth.getSession().then(({ data }) => manejarSesion(data.session)); },
   };
 

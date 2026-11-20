@@ -12,6 +12,7 @@ App web (pensada para el celular) para organizar las giras nacionales de un espe
 - **Historial por teatro:** cuántas veces fuimos y cuánta gente vino.
 - **Cierre de función:** después de cada show se carga el público real; al programar una fecha se ve cómo fue la última vez.
 - **Eventos privados** (empresas, fiestas, festivales, municipios) con cliente, lugar y organizador, y su propia pestaña.
+- **Funciona sin internet** (solo lectura): la app y los últimos datos quedan guardados en el celular.
 - **Recaudación y gastos por función**, visibles solo para administradores (protegidos en la base de datos).
 - **Recordatorios:** funciones de los próximos 7 días con cosas pendientes.
 - **Números:** estadísticas de público por provincia, por mes y teatros con mejor ocupación.
@@ -29,6 +30,7 @@ Hecha con HTML/CSS/JavaScript, sin compilación. Publicada en GitHub Pages con b
 | `js/app.js` | Toda la lógica de la app |
 | `js/config.js` | Dirección y clave pública de Supabase |
 | `css/styles.css` | Estilos |
+| `sw.js` | Service worker: permite abrir la app sin internet |
 | `supabase/instalacion.sql` | Tablas, permisos y carga inicial de teatros (con comentarios) |
 | `supabase/instalar.sql` | Lo mismo, sin comentarios (para pegar desde el celular) |
 | `supabase/actualizacion-2.sql` | Actualización para los extras (versión 2) |
