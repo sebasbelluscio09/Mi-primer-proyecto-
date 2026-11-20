@@ -70,6 +70,12 @@ Reglas para SQL nuevo:
 - Playwright con Supabase falso: interceptar `cdn.jsdelivr.net` y servir un stub de `window.supabase` (from/select/insert/update/upsert/delete, rpc es_admin, storage, auth). Fijar la fecha con un `addInitScript` que reemplace `Date`. Probar como admin y como equipo (`#lector`). Mirar capturas a 390px de ancho.
 - SQL: Postgres 16 local (`/usr/lib/postgresql/16/bin`, socket en `/var/tmp/pgt` porque la ruta del scratchpad es muy larga), con stubs de roles `anon`/`authenticated`, `auth.jwt()`, publicación `supabase_realtime` y `storage.buckets/objects`. Correr todos los scripts en orden dos veces y verificar RLS con `set role authenticated; set request.jwt.claims = '{"email":"..."}'`.
 
+## Pendiente con el usuario (retomar acá)
+
+- **Sumar al equipo (4 personas)**: el usuario todavía no tenía sus emails. Pasos: crear cada usuario en Supabase (Add user → Create new user, contraseña provisoria, "Auto Confirm User"; NO agregarlos a `admins`) y mandarles por WhatsApp la placa `material/placa-equipo.png` + un mensaje aparte con link, email y contraseña provisoria.
+- La placa se regenera con `material/generar-placa.js` (Playwright + `qrcode-generator` en el scratchpad; Inter como fuente, sin emojis porque el Chromium del contenedor no tiene fuente de emojis a color).
+- Ideas que le propuse y le interesaron como próximas: 1) hoja de ruta del día para el equipo, 2) presupuesto y rentabilidad por fecha (solo admin). Otras: seguimiento de venta de entradas, contactos por fecha, opciones con vencimiento, página pública de la gira, exportar a Excel.
+
 ## Ideas pendientes (proponerlas cuando venga al caso)
 
 - Notificaciones push / email de recordatorios (hoy solo se ven dentro de la app).
