@@ -27,6 +27,14 @@ Tiempo total: unos 15 minutos. No hace falta saber programar.
 
    Esto te convierte en administrador.
 
+## Paso 2.6 · Actualización para los extras (versión 2)
+
+Agrega logística, checklist, entradas, ubicaciones para el mapa y el espacio para documentos.
+
+1. Abrí [`supabase/actualizacion-2.sql`](supabase/actualizacion-2.sql) y copiá todo el texto.
+2. En Supabase → **SQL Editor** → hoja nueva → pegar → **Run** → **Run query**.
+3. Tiene que decir **Success**. Se puede ejecutar más de una vez sin problema.
+
 ## Paso 3 · Crear los usuarios (vos y tu equipo)
 
 1. Menú izquierdo → **Authentication** → **Users** → botón **Add user** → **Create new user**.

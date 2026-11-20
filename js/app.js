@@ -1,5 +1,7 @@
-/* Agenda de Gira — versión 1
-   Calendario de funciones + base de teatros + acceso de usuarios.
+/* Agenda de Gira — versión 2
+   Calendario + teatros + usuarios, y además: avisos de conflicto, mapa de la gira,
+   logística, checklist técnico, entradas, historial por teatro, exportar a
+   calendario, compartir por WhatsApp y documentos adjuntos.
    Sin herramientas de compilación: este archivo se sirve tal cual. */
 (() => {
   'use strict';
@@ -20,6 +22,14 @@
   const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
     'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   const DIAS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const CHECKLIST_BASE = [
+    'Rider técnico enviado', 'Rider técnico confirmado por el teatro', 'Plano de luces enviado',
+    'Sonido confirmado', 'Luces confirmadas', 'Pantalla / proyector', 'Camarín y catering',
+    'Prueba de sonido realizada',
+  ];
+  const DISTANCIA_AVISO_KM = 600; // ciudades a más de esta distancia en días seguidos
+  const DURACION_FUNCION_H = 2;
+  const BUCKET = 'documentos';
 
   const $app = document.getElementById('app');
   const $modal = document.getElementById('modal-root');
@@ -32,15 +42,26 @@
   const isoDe = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`; // m: 0-11
   const hoyISO = () => { const t = new Date(); return isoDe(t.getFullYear(), t.getMonth(), t.getDate()); };
   const aFecha = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+  const sumarDias = (iso, n) => { const d = aFecha(iso); d.setDate(d.getDate() + n); return isoDe(d.getFullYear(), d.getMonth(), d.getDate()); };
   const fechaLarga = (iso) => aFecha(iso).toLocaleDateString('es-AR',
     { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const fechaCorta = (iso) => aFecha(iso).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
   const horaCorta = (h) => (h ? h.slice(0, 5) : '');
-  const normalizar = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const normalizar = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const estadoLabel = (v) => (ESTADOS.find((e) => e.v === v) || { label: v }).label;
   const numero = (n) => (n == null ? '' : Number(n).toLocaleString('es-AR'));
   const telLink = (t) => `tel:${String(t).replace(/[^\d+]/g, '')}`;
   const mapaLink = (t) => 'https://www.google.com/maps/search/?api=1&query=' +
     encodeURIComponent([t.nombre, t.direccion, t.ciudad, t.provincia, 'Argentina'].filter(Boolean).join(', '));
+  const ordenFunciones = (a, b) => (a.fecha + (a.hora || '')).localeCompare(b.fecha + (b.hora || ''));
+  const capitalizar = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  function distanciaKm([la1, lo1], [la2, lo2]) {
+    const r = Math.PI / 180;
+    const a = Math.sin((la2 - la1) * r / 2) ** 2 +
+      Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
+    return Math.round(6371 * 2 * Math.asin(Math.sqrt(a)));
+  }
 
   let toastTimer;
   function toast(msg, esError = false) {
@@ -55,11 +76,25 @@
     const m = (err && (err.message || err.error_description)) || String(err);
     if (/invalid login credentials/i.test(m)) return 'Email o contraseña incorrectos.';
     if (/email not confirmed/i.test(m)) return 'El email todavía no fue confirmado.';
-    if (/row-level security|permission denied/i.test(m)) return 'No tenés permiso para hacer este cambio.';
+    if (/row-level security|permission denied|unauthorized/i.test(m)) return 'No tenés permiso para hacer este cambio.';
     if (/failed to fetch|network/i.test(m)) return 'Sin conexión. Revisá internet y probá de nuevo.';
     if (/password should be at least/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres.';
     if (/same.*password|different from the old/i.test(m)) return 'La nueva contraseña debe ser distinta de la anterior.';
+    if (/bucket not found/i.test(m)) return 'Falta activar los documentos en Supabase (paso de actualización de la guía).';
+    if (/column .* does not exist|could not find the .* column/i.test(m)) return 'Falta ejecutar la actualización de la base de datos (ver guía).';
+    if (/exceeded the maximum allowed size|payload too large/i.test(m)) return 'El archivo es demasiado grande (máximo 50 MB).';
     return 'Ocurrió un error: ' + m;
+  }
+
+  function cargarScript(src) {
+    return new Promise((ok, mal) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = ok; s.onerror = () => mal(new Error('No se pudo cargar ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  function cargarCss(href) {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
   }
 
   // ---------- Configuración ----------
@@ -88,9 +123,10 @@
   const state = {
     user: null,
     isAdmin: false,
-    cargado: false,
     teatros: [],
     funciones: [],
+    avisos: [],
+    avisosPorFuncion: {},
     vista: 'calendario',
     calModo: 'mes',
     mes: { y: ahora.getFullYear(), m: ahora.getMonth() },
@@ -99,10 +135,64 @@
     verPasadas: false,
     buscaTeatro: '',
     provTeatro: '',
+    mapaRango: 'proximas',
+    modalFuncionId: null,
   };
   let canal = null;
+  let mapa = null;
 
   const teatroDe = (id) => state.teatros.find((t) => t.id === id);
+
+  // Coordenadas de una función: las de su teatro o, si no tiene, las de otro teatro de la misma ciudad.
+  function coordsDe(f) {
+    const t = teatroDe(f.teatro_id);
+    if (t && t.latitud != null && t.longitud != null) return [t.latitud, t.longitud];
+    const c = normalizar(f.ciudad);
+    const otro = state.teatros.find((x) => x.latitud != null && normalizar(x.ciudad) === c);
+    return otro ? [otro.latitud, otro.longitud] : null;
+  }
+
+  // ---------- Avisos de conflicto ----------
+  function calcularAvisos() {
+    const activas = state.funciones.filter((f) => f.estado !== 'cancelada').sort(ordenFunciones);
+    const porFecha = {};
+    activas.forEach((f) => { (porFecha[f.fecha] = porFecha[f.fecha] || []).push(f); });
+    const avisos = [];
+
+    Object.keys(porFecha).sort().forEach((fecha) => {
+      const fs = porFecha[fecha];
+      if (fs.length > 1) {
+        const ciudades = [...new Set(fs.map((f) => f.ciudad))];
+        if (ciudades.length > 1) {
+          avisos.push({ fecha, grave: true, ids: fs.map((f) => f.id),
+            texto: `Funciones en ${ciudades.join(' y ')} el mismo día` });
+        } else {
+          avisos.push({ fecha, grave: false, ids: fs.map((f) => f.id),
+            texto: `${fs.length} funciones el mismo día en ${ciudades[0]} (¿doble función?)` });
+        }
+      }
+      const siguientes = porFecha[sumarDias(fecha, 1)];
+      if (siguientes) {
+        const a = fs[fs.length - 1];
+        const b = siguientes[0];
+        const ca = coordsDe(a); const cb = coordsDe(b);
+        if (ca && cb) {
+          const km = distanciaKm(ca, cb);
+          if (km > DISTANCIA_AVISO_KM) {
+            avisos.push({ fecha, grave: true, ids: [a.id, b.id],
+              texto: `${a.ciudad} → ${b.ciudad}: unos ${numero(km)} km en días seguidos` });
+          }
+        }
+      }
+    });
+
+    state.avisos = avisos;
+    state.avisosPorFuncion = {};
+    avisos.forEach((av) => av.ids.forEach((id) => {
+      (state.avisosPorFuncion[id] = state.avisosPorFuncion[id] || []).push(av);
+    }));
+  }
+  const avisosProximos = () => state.avisos.filter((a) => a.fecha >= hoyISO());
 
   // ---------- Datos ----------
   async function cargarDatos() {
@@ -114,7 +204,7 @@
     if (f.error) throw f.error;
     state.teatros = t.data;
     state.funciones = f.data;
-    state.cargado = true;
+    calcularAvisos();
   }
 
   let recargaTimer;
@@ -138,7 +228,7 @@
   });
 
   // ---------- Sesión ----------
-  let sesionUid = undefined;
+  let sesionUid;
   sb.auth.onAuthStateChange((_evento, session) => {
     const uid = session?.user?.id ?? null;
     if (uid === sesionUid) return; // solo actuar cuando cambia el usuario
@@ -148,7 +238,7 @@
 
   async function manejarSesion(session) {
     if (!session) {
-      state.user = null; state.isAdmin = false; state.cargado = false;
+      state.user = null; state.isAdmin = false;
       if (canal) { sb.removeChannel(canal); canal = null; }
       renderLogin();
       return;
@@ -176,6 +266,7 @@
   // ---------- Pantalla de ingreso ----------
   function renderLogin(error = '') {
     cerrarModal();
+    quitarMapa();
     $app.innerHTML = `<div class="login"><div class="login-card">
       <img class="logo" src="icon.svg" alt="">
       <h1>Agenda de Gira</h1>
@@ -197,7 +288,10 @@
   function render() {
     if (!state.user) return renderLogin();
     if (!state.isAdmin && state.vista === 'teatros') state.vista = 'calendario';
-    const tabs = [{ id: 'calendario', label: 'Calendario', ico: '📅' }];
+    const tabs = [
+      { id: 'calendario', label: 'Calendario', ico: '📅' },
+      { id: 'mapa', label: 'Mapa', ico: '🗺️' },
+    ];
     if (state.isAdmin) tabs.push({ id: 'teatros', label: 'Teatros', ico: '🎭' });
     tabs.push({ id: 'cuenta', label: 'Cuenta', ico: '👤' });
 
@@ -218,11 +312,14 @@
   function renderMain() {
     const $main = document.getElementById('main');
     if (!$main) return;
+    quitarMapa();
     let html = '';
     let fab = '';
     if (state.vista === 'calendario') {
       html = vistaCalendario();
       if (state.isAdmin) fab = '<button class="fab" data-action="nuevaFuncion">+ Función</button>';
+    } else if (state.vista === 'mapa') {
+      html = vistaMapa();
     } else if (state.vista === 'teatros') {
       html = vistaTeatros();
       fab = '<button class="fab" data-action="nuevoTeatro">+ Teatro</button>';
@@ -231,15 +328,24 @@
     }
     $main.innerHTML = html;
     document.getElementById('fab').innerHTML = fab;
+    if (state.vista === 'mapa') dibujarMapa();
   }
 
   // ---------- Calendario ----------
+  function bannerAvisos() {
+    const av = avisosProximos();
+    if (!av.length) return '';
+    const graves = av.filter((a) => a.grave).length;
+    return `<button class="aviso-banner ${graves ? 'grave' : ''}" data-action="verAvisos">
+      ⚠️ ${av.length} aviso${av.length > 1 ? 's' : ''} en la gira <span>Ver ›</span></button>`;
+  }
+
   function vistaCalendario() {
     const seg = `<div class="segmented" role="tablist">
       <button data-action="calModo" data-modo="mes" class="${state.calModo === 'mes' ? 'activo' : ''}">Mes</button>
       <button data-action="calModo" data-modo="lista" class="${state.calModo === 'lista' ? 'activo' : ''}">Lista</button>
     </div>`;
-    return seg + (state.calModo === 'mes' ? vistaMes() : vistaLista());
+    return seg + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
   }
 
   function leyenda() {
@@ -262,7 +368,8 @@
     for (let d = 1; d <= diasMes; d++) {
       const iso = isoDe(y, m, d);
       const fs = porDia[iso] || [];
-      const clases = ['dia', iso === hoy ? 'hoy' : '', iso === state.diaSel ? 'sel' : ''].join(' ');
+      const conAviso = fs.some((f) => state.avisosPorFuncion[f.id]);
+      const clases = ['dia', iso === hoy ? 'hoy' : '', iso === state.diaSel ? 'sel' : '', conAviso ? 'con-aviso' : ''].join(' ');
       const chips = fs.slice(0, 2).map((f) =>
         `<span class="chip est-${f.estado}">${esc(f.ciudad)}</span>`).join('');
       const mas = fs.length > 2 ? `<span class="mas">+${fs.length - 2}</span>` : '';
@@ -271,10 +378,10 @@
         <span class="num">${d}</span>${chips}${mas}</button>`;
     }
 
-    const items = state.diaSel && state.diaSel.startsWith(prefijo) ? (porDia[state.diaSel] || []) : delMes;
-    const titulo = state.diaSel && state.diaSel.startsWith(prefijo)
-      ? fechaLarga(state.diaSel) : `Funciones de ${MESES[m]}`;
-    const vacio = state.diaSel && state.diaSel.startsWith(prefijo)
+    const enEsteMes = state.diaSel && state.diaSel.startsWith(prefijo);
+    const items = enEsteMes ? (porDia[state.diaSel] || []) : delMes;
+    const titulo = enEsteMes ? fechaLarga(state.diaSel) : `Funciones de ${MESES[m]}`;
+    const vacio = enEsteMes
       ? (state.isAdmin ? 'Sin funciones este día. Tocá “+ Función” para agregar una.' : 'Sin funciones este día.')
       : 'No hay funciones cargadas este mes.';
 
@@ -285,12 +392,12 @@
         <button class="btn-icono" data-action="mesSig" aria-label="Mes siguiente">›</button>
       </div>
       <div class="grilla">${celdas}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="fila-leyenda">
         ${leyenda()}
-        <button class="hoy btn-icono" style="width:auto;padding:0 12px;font-size:14px" data-action="irHoy">Hoy</button>
+        <button class="btn-icono btn-hoy" data-action="irHoy">Hoy</button>
       </div>
       <div class="seccion-titulo">${esc(titulo)}</div>
-      ${items.length ? `<div class="lista">${items.map(tarjetaFuncion).join('')}</div>`
+      ${items.length ? `<div class="lista">${items.map((f) => tarjetaFuncion(f)).join('')}</div>`
         : `<div class="vacio-msg">${vacio}</div>`}`;
   }
 
@@ -313,7 +420,8 @@
         ${ESTADOS.map((e) => `<option value="${e.v}" ${state.filtroEstado === e.v ? 'selected' : ''}>${e.label}</option>`).join('')}
       </select>
       <label class="check"><input type="checkbox" data-change="verPasadas" ${state.verPasadas ? 'checked' : ''}> Mostrar pasadas</label>
-    </div>`;
+    </div>
+    <button class="btn bloque" data-action="exportarTodo" style="margin-bottom:6px">📆 Exportar calendario (Google / iPhone)</button>`;
 
     if (!grupos.length) {
       return filtros + `<div class="vacio-msg">${state.funciones.length
@@ -323,14 +431,16 @@
     return filtros + grupos.map((g) => {
       const [y, m] = g.clave.split('-').map(Number);
       return `<div class="seccion-titulo">${MESES[m - 1]} ${y} · ${g.items.length}</div>
-        <div class="lista">${g.items.map(tarjetaFuncion).join('')}</div>`;
+        <div class="lista">${g.items.map((f) => tarjetaFuncion(f)).join('')}</div>`;
     }).join('');
   }
 
-  function tarjetaFuncion(f) {
+  function tarjetaFuncion(f, { conPublico = false } = {}) {
     const d = aFecha(f.fecha);
     const t = teatroDe(f.teatro_id);
-    const sub = [t ? t.nombre : 'Teatro a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`].filter(Boolean).join(' · ');
+    const partes = [t ? t.nombre : 'Teatro a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`];
+    if (conPublico && f.entradas_vendidas != null) partes.push(`${numero(f.entradas_vendidas)} personas`);
+    const aviso = state.avisosPorFuncion[f.id] ? '<span class="marca-aviso" title="Tiene avisos">⚠️</span> ' : '';
     return `<button class="card funcion est-${f.estado}" data-action="verFuncion" data-id="${f.id}">
       <div class="fecha-box">
         <span class="ds">${d.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}</span>
@@ -338,41 +448,101 @@
         <span class="ma">${MESES[d.getMonth()].slice(0, 3)}</span>
       </div>
       <div class="card-body">
-        <div class="card-title">${esc(f.ciudad)}</div>
-        <div class="card-sub">${esc(sub)}</div>
+        <div class="card-title">${aviso}${esc(f.ciudad)}</div>
+        <div class="card-sub">${esc(partes.filter(Boolean).join(' · '))}</div>
       </div>
       <span class="badge est-${f.estado}">${estadoLabel(f.estado)}</span>
     </button>`;
   }
 
-  // ---------- Detalle y formulario de función ----------
+  function verAvisos() {
+    const av = avisosProximos();
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>Avisos de la gira</h2><div class="sub">Funciones canceladas no se tienen en cuenta</div></div>
+        <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      ${av.length ? av.map((a) => `
+        <div class="aviso-box ${a.grave ? 'grave' : ''}">
+          <b>${esc(capitalizar(fechaLarga(a.fecha)))}</b><br>${esc(a.texto)}
+          <div class="lista" style="margin-top:8px">${a.ids.map((id) => state.funciones.find((f) => f.id === id))
+            .filter(Boolean).map((f) => tarjetaFuncion(f)).join('')}</div>
+        </div>`).join('') : '<div class="vacio-msg">No hay avisos. ¡Todo en orden!</div>'}`);
+  }
+
+  // ---------- Detalle de función ----------
   function verFuncion(id) {
     const f = state.funciones.find((x) => x.id === id);
     if (!f) return;
+    state.modalFuncionId = id;
     const t = teatroDe(f.teatro_id);
+    const avisos = state.avisosPorFuncion[f.id] || [];
+
     const teatroHtml = t ? `
       <div class="dato"><div class="k">Teatro</div><div class="v"><b>${esc(t.nombre)}</b>
         ${t.a_verificar ? ' <span class="badge verificar">a verificar</span>' : ''}</div></div>
       ${t.direccion ? `<div class="dato"><div class="k">Dirección</div><div class="v">
         <a href="${mapaLink(t)}" target="_blank" rel="noopener">${esc(t.direccion)}, ${esc(t.ciudad)} ↗</a></div></div>` : ''}
-      ${t.capacidad ? `<div class="dato"><div class="k">Capacidad</div><div class="v">${numero(t.capacidad)} personas</div></div>` : ''}
-      ${contactoHtml(t)}` : `<div class="dato"><div class="k">Teatro</div><div class="v muted">A definir</div></div>`;
+      ${contactoHtml(t)}` : '<div class="dato"><div class="k">Teatro</div><div class="v muted">A definir</div></div>';
+
+    const logistica = [
+      f.prueba_sonido && `<div class="dato"><div class="k">Prueba de sonido</div><div class="v">${horaCorta(f.prueba_sonido)} h</div></div>`,
+      f.traslado && `<div class="dato"><div class="k">Traslado</div><div class="v multilinea">${esc(f.traslado)}</div></div>`,
+      f.hotel && `<div class="dato"><div class="k">Hotel</div><div class="v multilinea">${esc(f.hotel)}</div></div>`,
+    ].filter(Boolean).join('');
 
     abrirModal(`
       <div class="modal-cab">
-        <div><h2>${esc(f.ciudad)}</h2><div class="sub">${esc(fechaLarga(f.fecha))}</div></div>
+        <div><h2>${esc(f.ciudad)}</h2><div class="sub">${esc(capitalizar(fechaLarga(f.fecha)))}</div></div>
         <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
       </div>
+
+      ${avisos.map((a) => `<div class="aviso-box ${a.grave ? 'grave' : ''}">⚠️ ${esc(a.texto)}</div>`).join('')}
+
+      <div class="acciones compartir">
+        <a class="btn whatsapp" href="https://wa.me/?text=${encodeURIComponent(textoWhatsApp(f))}" target="_blank" rel="noopener">💬 WhatsApp</a>
+        <button class="btn" data-action="agendar" data-id="${f.id}">📆 Agendar</button>
+      </div>
+
       <div class="datos">
         <div class="dato"><div class="k">Estado</div><div class="v"><span class="badge est-${f.estado}">${estadoLabel(f.estado)}</span></div></div>
         <div class="dato"><div class="k">Hora</div><div class="v">${f.hora ? horaCorta(f.hora) + ' h' : '<span class="muted">A definir</span>'}</div></div>
         ${teatroHtml}
         ${f.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(f.notas)}</div></div>` : ''}
       </div>
-      ${state.isAdmin ? `<div class="acciones">
+
+      <h3 class="sub-titulo">🎟️ Entradas</h3>
+      ${entradasHtml(f, t)}
+
+      <h3 class="sub-titulo">🚐 Logística</h3>
+      ${logistica ? `<div class="datos">${logistica}</div>`
+        : `<div class="vacio-msg chico">Sin datos de logística${state.isAdmin ? ' — cargalos con “Editar”' : ''}.</div>`}
+
+      <h3 class="sub-titulo">✅ Checklist técnico</h3>
+      <div id="checklist">${checklistHtml(f)}</div>
+
+      <h3 class="sub-titulo">📎 Documentos</h3>
+      <div id="docs"><div class="vacio-msg chico">Cargando documentos…</div></div>
+
+      ${state.isAdmin ? `<div class="acciones" style="margin-top:18px">
         <button class="btn primario" data-action="editarFuncion" data-id="${f.id}">Editar</button>
         <button class="btn peligro" data-action="borrarFuncion" data-id="${f.id}">Borrar</button>
       </div>` : ''}`);
+    cargarDocs(f.id);
+  }
+
+  function entradasHtml(f, t) {
+    const cap = t && t.capacidad;
+    if (f.entradas_vendidas == null) {
+      return `<div class="vacio-msg chico">Sin dato de entradas vendidas${cap ? ` · capacidad ${numero(cap)}` : ''}.</div>`;
+    }
+    if (!cap) return `<div class="datos"><div class="dato"><div class="k">Vendidas</div><div class="v"><b>${numero(f.entradas_vendidas)}</b> <span class="muted">(capacidad sin cargar)</span></div></div></div>`;
+    const pct = Math.round(f.entradas_vendidas * 100 / cap);
+    return `<div class="panel ocupacion">
+      <div class="ocupacion-num"><b>${numero(f.entradas_vendidas)}</b> de ${numero(cap)} · <b>${pct}%</b></div>
+      <div class="barra"><div style="width:${Math.min(pct, 100)}%"></div></div>
+      <div class="small muted">${f.entradas_vendidas >= cap ? '¡Sala llena!' : `Quedan ${numero(cap - f.entradas_vendidas)} lugares`}</div>
+    </div>`;
   }
 
   function contactoHtml(t) {
@@ -386,6 +556,222 @@
     </div></div>`;
   }
 
+  // ---------- Checklist técnico ----------
+  const checklistDe = (f) => (Array.isArray(f.checklist) ? f.checklist
+    : CHECKLIST_BASE.map((texto) => ({ texto, hecho: false })));
+
+  function checklistHtml(f) {
+    const items = checklistDe(f);
+    const hechos = items.filter((i) => i.hecho).length;
+    return `<div class="panel checklist">
+      <div class="small muted" style="margin-bottom:8px">${hechos} de ${items.length} listos</div>
+      ${items.map((it, i) => `<div class="check-item">
+        <label class="check"><input type="checkbox" data-change="checkItem" data-i="${i}" ${it.hecho ? 'checked' : ''} ${state.isAdmin ? '' : 'disabled'}>
+          <span class="${it.hecho ? 'tachado' : ''}">${esc(it.texto)}</span></label>
+        ${state.isAdmin ? `<button class="x" data-action="quitarItem" data-i="${i}" aria-label="Quitar ítem">✕</button>` : ''}
+      </div>`).join('')}
+      ${state.isAdmin ? `<form data-form="checkNuevo" class="check-nuevo" novalidate>
+        <input name="texto" placeholder="Agregar ítem…" aria-label="Nuevo ítem del checklist">
+        <button class="btn" type="submit">Agregar</button>
+      </form>` : ''}
+    </div>`;
+  }
+
+  async function guardarChecklist(items) {
+    const f = state.funciones.find((x) => x.id === state.modalFuncionId);
+    if (!f) return;
+    const anterior = f.checklist;
+    f.checklist = items;
+    const $c = document.getElementById('checklist');
+    if ($c) $c.innerHTML = checklistHtml(f);
+    const { error } = await sb.from('funciones').update({ checklist: items }).eq('id', f.id);
+    if (error) {
+      f.checklist = anterior;
+      if ($c) $c.innerHTML = checklistHtml(f);
+      toast(traducirError(error), true);
+    }
+  }
+
+  // ---------- Documentos ----------
+  const nombreSeguro = (n) => normalizar(n).replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'archivo';
+  const nombreVisible = (n) => n.replace(/^\d+-/, '');
+
+  async function cargarDocs(fid) {
+    const $d = document.getElementById('docs');
+    if (!$d) return;
+    const subir = state.isAdmin ? `<label class="btn bloque subir">📤 Adjuntar contrato o documento
+      <input type="file" data-change="subirDoc" multiple hidden></label>` : '';
+    const { data, error } = await sb.storage.from(BUCKET).list(fid, { sortBy: { column: 'created_at', order: 'desc' } });
+    if (state.modalFuncionId !== fid || !document.getElementById('docs')) return;
+    if (error) {
+      $d.innerHTML = `<div class="vacio-msg chico">${esc(traducirError(error))}</div>`;
+      return;
+    }
+    const archivos = (data || []).filter((a) => a.name && a.id);
+    let lista = '<div class="vacio-msg chico">No hay documentos adjuntos.</div>';
+    if (archivos.length) {
+      const rutas = archivos.map((a) => `${fid}/${a.name}`);
+      const { data: urls } = await sb.storage.from(BUCKET).createSignedUrls(rutas, 3600);
+      lista = `<div class="datos">${archivos.map((a, i) => `
+        <div class="dato doc">
+          <a class="v" href="${esc(urls?.[i]?.signedUrl || '#')}" target="_blank" rel="noopener">📄 ${esc(nombreVisible(a.name))}</a>
+          ${state.isAdmin ? `<button class="x" data-action="borrarDoc" data-ruta="${esc(rutas[i])}" aria-label="Borrar documento">✕</button>` : ''}
+        </div>`).join('')}</div>`;
+    }
+    $d.innerHTML = lista + subir;
+  }
+
+  async function subirDocs(input) {
+    const fid = state.modalFuncionId;
+    const archivos = [...input.files];
+    if (!fid || !archivos.length) return;
+    const $d = document.getElementById('docs');
+    if ($d) $d.insertAdjacentHTML('afterbegin', '<div class="vacio-msg chico">Subiendo…</div>');
+    for (const a of archivos) {
+      const ruta = `${fid}/${Date.now()}-${nombreSeguro(a.name)}`;
+      const { error } = await sb.storage.from(BUCKET).upload(ruta, a, { contentType: a.type || undefined });
+      if (error) { toast(traducirError(error), true); break; }
+    }
+    cargarDocs(fid);
+    toast('Documento subido ✓');
+  }
+
+  async function borrarDoc(ruta) {
+    if (!confirm(`¿Borrar "${nombreVisible(ruta.split('/').pop())}"?`)) return;
+    const { error } = await sb.storage.from(BUCKET).remove([ruta]);
+    if (error) return toast(traducirError(error), true);
+    cargarDocs(state.modalFuncionId);
+    toast('Documento borrado');
+  }
+
+  // ---------- Compartir y exportar ----------
+  function textoWhatsApp(f) {
+    const t = teatroDe(f.teatro_id);
+    const l = [`🎭 *${f.ciudad}* — ${capitalizar(fechaLarga(f.fecha))}${f.hora ? `, ${horaCorta(f.hora)} h` : ''}`];
+    if (t) l.push(`📍 ${t.nombre}${t.direccion ? ` — ${t.direccion}` : ''}`);
+    l.push(`Estado: ${estadoLabel(f.estado)}`);
+    if (f.prueba_sonido) l.push(`🎚️ Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`);
+    if (f.traslado) l.push(`🚐 Traslado: ${f.traslado}`);
+    if (f.hotel) l.push(`🏨 Hotel: ${f.hotel}`);
+    if (f.notas) l.push(`📝 ${f.notas}`);
+    if (t) l.push(`🗺️ ${mapaLink(t)}`);
+    return l.join('\n');
+  }
+
+  const icsTexto = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const utc = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const fechaCompacta = (iso) => iso.replace(/-/g, '');
+
+  // Argentina usa UTC-3 todo el año: se convierte la hora local a UTC sumando 3 h.
+  function rangoFuncion(f) {
+    if (!f.hora) return { todoElDia: true, ini: fechaCompacta(f.fecha), fin: fechaCompacta(sumarDias(f.fecha, 1)) };
+    const [y, m, d] = f.fecha.split('-').map(Number);
+    const [hh, mm] = f.hora.split(':').map(Number);
+    const ini = new Date(Date.UTC(y, m - 1, d, hh + 3, mm));
+    const fin = new Date(ini.getTime() + DURACION_FUNCION_H * 3600e3);
+    return { todoElDia: false, ini: utc(ini), fin: utc(fin) };
+  }
+
+  function tituloEvento(f) {
+    const t = teatroDe(f.teatro_id);
+    return `🎭 ${f.ciudad}${t ? ` – ${t.nombre}` : ''}${f.estado === 'opcion' ? ' (Opción)' : ''}${f.estado === 'cancelada' ? ' (CANCELADA)' : ''}`;
+  }
+  function lugarEvento(f) {
+    const t = teatroDe(f.teatro_id);
+    return t ? [t.nombre, t.direccion, t.ciudad, t.provincia].filter(Boolean).join(', ') : f.ciudad;
+  }
+  function detalleEvento(f) {
+    return [
+      `Estado: ${estadoLabel(f.estado)}`,
+      f.prueba_sonido && `Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`,
+      f.traslado && `Traslado: ${f.traslado}`,
+      f.hotel && `Hotel: ${f.hotel}`,
+      f.notas,
+    ].filter(Boolean).join('\n');
+  }
+
+  function plegar(linea) {
+    const partes = [];
+    let resto = linea;
+    while (resto.length > 70) { partes.push(resto.slice(0, 70)); resto = ' ' + resto.slice(70); }
+    partes.push(resto);
+    return partes.join('\r\n');
+  }
+
+  function generarIcs(funciones) {
+    const ahoraUtc = utc(new Date());
+    const lineas = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Agenda de Gira//ES', 'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH', 'X-WR-CALNAME:Gira'];
+    funciones.forEach((f) => {
+      const r = rangoFuncion(f);
+      lineas.push('BEGIN:VEVENT', `UID:${f.id}@agenda-gira`, `DTSTAMP:${ahoraUtc}`);
+      if (r.todoElDia) lineas.push(`DTSTART;VALUE=DATE:${r.ini}`, `DTEND;VALUE=DATE:${r.fin}`);
+      else lineas.push(`DTSTART:${r.ini}`, `DTEND:${r.fin}`);
+      lineas.push(`SUMMARY:${icsTexto(tituloEvento(f))}`, `LOCATION:${icsTexto(lugarEvento(f))}`,
+        `DESCRIPTION:${icsTexto(detalleEvento(f))}`,
+        `STATUS:${{ confirmada: 'CONFIRMED', realizada: 'CONFIRMED', cancelada: 'CANCELLED' }[f.estado] || 'TENTATIVE'}`,
+        'END:VEVENT');
+    });
+    lineas.push('END:VCALENDAR');
+    return lineas.map(plegar).join('\r\n') + '\r\n';
+  }
+
+  function descargarIcs(funciones, nombre) {
+    const blob = new Blob([generarIcs(funciones)], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function linkGoogle(f) {
+    const r = rangoFuncion(f);
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+      `&text=${encodeURIComponent(tituloEvento(f))}&dates=${r.ini}/${r.fin}` +
+      `&details=${encodeURIComponent(detalleEvento(f))}&location=${encodeURIComponent(lugarEvento(f))}`;
+  }
+
+  function agendar(id) {
+    const f = state.funciones.find((x) => x.id === id);
+    if (!f) return;
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>Agendar función</h2><div class="sub">${esc(f.ciudad)} · ${esc(fechaCorta(f.fecha))}</div></div>
+        <button class="btn-icono" data-action="volverFuncion" data-id="${f.id}" aria-label="Volver">✕</button>
+      </div>
+      <div class="lista">
+        <a class="btn bloque" href="${linkGoogle(f)}" target="_blank" rel="noopener">Google Calendar</a>
+        <button class="btn bloque" data-action="icsUna" data-id="${f.id}">iPhone / Outlook (archivo .ics)</button>
+      </div>
+      <p class="small muted">En iPhone: tocá el archivo descargado y después “Agregar al calendario”.</p>`);
+  }
+
+  function exportarTodo() {
+    const hoy = hoyISO();
+    const proximas = state.funciones.filter((f) => f.estado !== 'cancelada' && f.fecha >= hoy);
+    const todas = state.funciones.filter((f) => f.estado !== 'cancelada');
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>Exportar calendario</h2><div class="sub">Funciones canceladas no se incluyen</div></div>
+        <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="lista">
+        <button class="btn primario bloque" data-action="icsTodas" data-rango="proximas" ${proximas.length ? '' : 'disabled'}>
+          Próximas funciones (${proximas.length})</button>
+        <button class="btn bloque" data-action="icsTodas" data-rango="todas" ${todas.length ? '' : 'disabled'}>
+          Todas, incluidas las pasadas (${todas.length})</button>
+      </div>
+      <div class="panel small" style="margin-top:14px">
+        <b>iPhone:</b> abrí el archivo descargado y tocá “Agregar todo”.<br><br>
+        <b>Google Calendar:</b> desde una computadora, entrá a calendar.google.com → ⚙️ Configuración →
+        “Importar y exportar” → elegí el archivo <i>gira.ics</i> → Importar.<br><br>
+        Si volvés a importar, las funciones que ya estaban se actualizan en lugar de duplicarse
+        (en Google Calendar puede depender de la versión).
+      </div>`);
+  }
+
+  // ---------- Formulario de función ----------
   function opcionesTeatros(seleccionado) {
     const porProv = {};
     state.teatros.forEach((t) => { (porProv[t.provincia] = porProv[t.provincia] || []).push(t); });
@@ -397,7 +783,7 @@
 
   function formFuncion(id) {
     const f = id ? state.funciones.find((x) => x.id === id)
-      : { fecha: state.diaSel || hoyISO(), hora: '21:00', estado: 'opcion', ciudad: '', teatro_id: null, notas: '' };
+      : { fecha: state.diaSel || hoyISO(), hora: '21:00', estado: 'opcion', ciudad: '', teatro_id: null };
     if (!f) return;
     abrirModal(`
       <div class="modal-cab">
@@ -416,6 +802,14 @@
         <label class="campo"><span>Estado</span>
           <select name="estado">${ESTADOS.map((e) =>
             `<option value="${e.v}" ${f.estado === e.v ? 'selected' : ''}>${e.label}</option>`).join('')}</select></label>
+        <label class="campo"><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0"
+          inputmode="numeric" value="${esc(f.entradas_vendidas)}" placeholder="Ej: 850"></label>
+        <div class="panel">
+          <h3>🚐 Logística</h3>
+          <label class="campo"><span>Prueba de sonido</span><input type="time" name="prueba_sonido" value="${esc(horaCorta(f.prueba_sonido))}"></label>
+          <label class="campo"><span>Traslado</span><textarea name="traslado" placeholder="Ej: Vuelo AR1234 sale 10:15 de Aeroparque. Remis al teatro.">${esc(f.traslado)}</textarea></label>
+          <label class="campo"><span>Hotel</span><textarea name="hotel" placeholder="Ej: Hotel Costa Galana, 3 habitaciones, check-in 14 h">${esc(f.hotel)}</textarea></label>
+        </div>
         <label class="campo"><span>Notas</span><textarea name="notas">${esc(f.notas)}</textarea></label>
         <p class="error" id="form-error" hidden></p>
         <button class="btn primario bloque" type="submit">Guardar</button>
@@ -424,22 +818,35 @@
 
   async function guardarFuncion(form) {
     const fd = new FormData(form);
+    const txt = (k) => String(fd.get(k) || '').trim() || null;
+    const ent = txt('entradas_vendidas');
     const datos = {
       fecha: fd.get('fecha'),
       hora: fd.get('hora') || null,
       teatro_id: fd.get('teatro_id') || null,
-      ciudad: String(fd.get('ciudad') || '').trim(),
+      ciudad: txt('ciudad'),
       estado: fd.get('estado'),
-      notas: String(fd.get('notas') || '').trim() || null,
+      entradas_vendidas: ent ? parseInt(ent, 10) : null,
+      prueba_sonido: fd.get('prueba_sonido') || null,
+      traslado: txt('traslado'),
+      hotel: txt('hotel'),
+      notas: txt('notas'),
     };
     if (!datos.fecha) return errorForm('Elegí una fecha.');
     if (!datos.ciudad) return errorForm('Escribí la ciudad (o elegí un teatro).');
+    if (datos.entradas_vendidas != null && (isNaN(datos.entradas_vendidas) || datos.entradas_vendidas < 0)) {
+      return errorForm('Las entradas vendidas deben ser un número.');
+    }
     const id = form.dataset.id;
-    const q = id ? sb.from('funciones').update(datos).eq('id', id) : sb.from('funciones').insert(datos);
-    await guardar(form, q, async () => {
+    const q = id ? sb.from('funciones').update(datos).eq('id', id).select().single()
+      : sb.from('funciones').insert(datos).select().single();
+    await guardar(form, q, async (fila) => {
       const [y, m] = datos.fecha.split('-').map(Number);
       state.mes = { y, m: m - 1 };
       state.diaSel = datos.fecha;
+      await cargarDatos();
+      const nuevos = (state.avisosPorFuncion[fila?.id] || []).filter((a) => a.grave);
+      if (nuevos.length) setTimeout(() => toast('⚠️ ' + nuevos.map((a) => a.texto).join(' · '), true), 2600);
     });
   }
 
@@ -448,14 +855,113 @@
     if (!f || !confirm(`¿Borrar la función de ${f.ciudad} del ${fechaLarga(f.fecha)}?\nEsta acción no se puede deshacer.`)) return;
     const { error } = await sb.from('funciones').delete().eq('id', id);
     if (error) return toast(traducirError(error), true);
+    // Borrar también sus documentos adjuntos (si los hay)
+    const { data: docs } = await sb.storage.from(BUCKET).list(id);
+    if (docs && docs.length) await sb.storage.from(BUCKET).remove(docs.map((d) => `${id}/${d.name}`));
     cerrarModal();
     await cargarDatos(); renderMain();
     toast('Función borrada');
   }
 
+  // ---------- Mapa ----------
+  function funcionesMapa() {
+    const hoy = hoyISO();
+    let fs = state.funciones.filter((f) => f.estado !== 'cancelada');
+    if (state.mapaRango === 'proximas') fs = fs.filter((f) => f.fecha >= hoy);
+    else if (state.mapaRango !== 'todas') fs = fs.filter((f) => f.fecha.startsWith(state.mapaRango));
+    return fs.sort(ordenFunciones);
+  }
+
+  function vistaMapa() {
+    const meses = [...new Set(state.funciones.map((f) => f.fecha.slice(0, 7)))].sort();
+    const fs = funcionesMapa();
+    const conCoords = fs.filter((f) => coordsDe(f));
+    const sinCoords = fs.filter((f) => !coordsDe(f));
+    let total = 0;
+    const tramos = conCoords.map((f, i) => {
+      if (i === 0) return '';
+      const km = distanciaKm(coordsDe(conCoords[i - 1]), coordsDe(f));
+      total += km;
+      return km;
+    });
+    return `
+      <div class="filtros">
+        <select data-change="mapaRango" aria-label="Qué funciones mostrar">
+          <option value="proximas" ${state.mapaRango === 'proximas' ? 'selected' : ''}>Próximas funciones</option>
+          <option value="todas" ${state.mapaRango === 'todas' ? 'selected' : ''}>Todas (incluye pasadas)</option>
+          ${meses.map((m) => { const [y, mm] = m.split('-').map(Number);
+            return `<option value="${m}" ${state.mapaRango === m ? 'selected' : ''}>${capitalizar(MESES[mm - 1])} ${y}</option>`; }).join('')}
+        </select>
+      </div>
+      <div id="mapa" class="mapa"><div class="cargando">Cargando mapa…</div></div>
+      ${conCoords.length > 1 ? `<p class="small muted">Recorrido aproximado en línea recta: <b>${numero(total)} km</b></p>` : ''}
+      ${conCoords.length ? `<div class="seccion-titulo">Recorrido</div>
+        <ol class="recorrido">${conCoords.map((f, i) => `
+          ${tramos[i] !== '' ? `<li class="tramo">↓ ${numero(tramos[i])} km</li>` : ''}
+          <li><button class="parada" data-action="verFuncion" data-id="${f.id}">
+            <span class="pin est-${f.estado}">${i + 1}</span>
+            <span><b>${esc(f.ciudad)}</b> · ${esc(fechaCorta(f.fecha))}${f.hora ? ` · ${horaCorta(f.hora)} h` : ''}</span>
+          </button></li>`).join('')}</ol>`
+        : '<div class="vacio-msg">No hay funciones con ubicación para mostrar.</div>'}
+      ${sinCoords.length ? `<div class="seccion-titulo">Sin ubicación en el mapa</div>
+        <p class="small muted">Elegí un teatro con ubicación en estas funciones para que aparezcan.</p>
+        <div class="lista">${sinCoords.map((f) => tarjetaFuncion(f)).join('')}</div>` : ''}`;
+  }
+
+  function quitarMapa() {
+    if (mapa) { mapa.remove(); mapa = null; }
+  }
+
+  async function dibujarMapa() {
+    try {
+      if (!window.L) {
+        cargarCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+        await cargarScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+      }
+    } catch (e) {
+      const $m = document.getElementById('mapa');
+      if ($m) $m.innerHTML = '<div class="cargando">No se pudo cargar el mapa. Revisá tu conexión.</div>';
+      return;
+    }
+    const $m = document.getElementById('mapa');
+    if (!$m || state.vista !== 'mapa') return;
+    quitarMapa();
+    $m.innerHTML = '';
+    const L = window.L;
+    mapa = L.map($m, { scrollWheelZoom: false }).setView([-38.4, -63.6], 4);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(mapa);
+    const fs = funcionesMapa().filter((f) => coordsDe(f));
+    const puntos = fs.map(coordsDe);
+    if (puntos.length > 1) {
+      L.polyline(puntos, { color: getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#7a1f2b',
+        weight: 3, opacity: 0.8, dashArray: '6 6' }).addTo(mapa);
+    }
+    // Funciones en el mismo lugar comparten un solo marcador (ej.: "1,2")
+    const grupos = new Map();
+    fs.forEach((f, i) => {
+      const clave = coordsDe(f).join(',');
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push({ f, n: i + 1 });
+    });
+    grupos.forEach((items) => {
+      const { f } = items[0];
+      const t = teatroDe(f.teatro_id);
+      const nums = items.map((x) => x.n).join(',');
+      const icono = L.divIcon({ className: '', html: `<span class="pin est-${f.estado}">${nums}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+      const lineas = items.map((x) => `${x.n}. ${esc(x.f.ciudad)} · ${esc(fechaCorta(x.f.fecha))}${x.f.hora ? ` ${horaCorta(x.f.hora)} h` : ''}`).join('<br>');
+      L.marker(coordsDe(f), { icon: icono, title: `${nums}. ${f.ciudad}` }).addTo(mapa)
+        .bindTooltip(lineas + (t ? `<br>${esc(t.nombre)}` : ''), { direction: 'top', offset: [0, -12] })
+        .on('click', () => verFuncion(f.id));
+    });
+    if (puntos.length === 1) mapa.setView(puntos[0], 10);
+    else if (puntos.length > 1) mapa.fitBounds(puntos, { padding: [30, 30] });
+  }
+
   // ---------- Teatros ----------
   function teatrosFiltrados() {
-    const q = normalizar(state.buscaTeatro.trim());
+    const q = normalizar(state.buscaTeatro);
     return state.teatros.filter((t) =>
       (!state.provTeatro || t.provincia === state.provTeatro) &&
       (!q || normalizar(`${t.nombre} ${t.ciudad} ${t.provincia}`).includes(q)));
@@ -478,20 +984,40 @@
     const pendientes = ts.filter((t) => t.a_verificar).length;
     if (!ts.length) return '<div class="vacio-msg">No se encontraron teatros.</div>';
     return `<p class="small muted">${ts.length} teatro(s)${pendientes ? ` · ${pendientes} a verificar` : ''}</p>
-      <div class="lista">${ts.map((t) => `
-        <button class="card" data-action="verTeatro" data-id="${t.id}">
+      <div class="lista">${ts.map((t) => {
+        const veces = state.funciones.filter((f) => f.teatro_id === t.id && f.estado !== 'cancelada').length;
+        return `<button class="card" data-action="verTeatro" data-id="${t.id}">
           <div class="card-body">
             <div class="card-title">${esc(t.nombre)}</div>
-            <div class="card-sub">${esc(t.ciudad)}, ${esc(t.provincia)}${t.capacidad ? ` · ${numero(t.capacidad)} lugares` : ''}</div>
+            <div class="card-sub">${esc(t.ciudad)}, ${esc(t.provincia)}${t.capacidad ? ` · ${numero(t.capacidad)} lugares` : ''}${veces ? ` · ${veces} función(es)` : ''}</div>
           </div>
           ${t.a_verificar ? '<span class="badge verificar">a verificar</span>' : ''}
-        </button>`).join('')}</div>`;
+        </button>`;
+      }).join('')}</div>`;
+  }
+
+  function historialHtml(t, fs) {
+    const hechas = fs.filter((f) => f.estado === 'realizada');
+    const conPublico = hechas.filter((f) => f.entradas_vendidas != null);
+    if (!hechas.length) return '';
+    let html = `<div class="panel historial"><div class="stat"><b>${hechas.length}</b><span>${hechas.length > 1 ? 'veces' : 'vez'} que fuimos</span></div>`;
+    if (conPublico.length) {
+      const total = conPublico.reduce((s, f) => s + f.entradas_vendidas, 0);
+      const prom = Math.round(total / conPublico.length);
+      const mejor = Math.max(...conPublico.map((f) => f.entradas_vendidas));
+      html += `<div class="stat"><b>${numero(prom)}</b><span>personas promedio${t.capacidad ? ` (${Math.round(prom * 100 / t.capacidad)}%)` : ''}</span></div>
+        <div class="stat"><b>${numero(mejor)}</b><span>mejor función</span></div>
+        <div class="stat"><b>${numero(total)}</b><span>personas en total</span></div>`;
+    }
+    const ultima = hechas[hechas.length - 1];
+    return html + `</div><p class="small muted">Última vez: ${esc(fechaLarga(ultima.fecha))}</p>`;
   }
 
   function verTeatro(id) {
     const t = teatroDe(id);
     if (!t) return;
-    const fs = state.funciones.filter((f) => f.teatro_id === id).slice().reverse();
+    state.modalFuncionId = null;
+    const fs = state.funciones.filter((f) => f.teatro_id === id).sort(ordenFunciones);
     abrirModal(`
       <div class="modal-cab">
         <div><h2>${esc(t.nombre)}</h2><div class="sub">${esc(t.ciudad)}, ${esc(t.provincia)}</div></div>
@@ -505,13 +1031,15 @@
         <div class="dato"><div class="k">Capacidad</div><div class="v">${t.capacidad ? numero(t.capacidad) + ' personas' : '<span class="muted">Sin dato</span>'}</div></div>
         ${contactoHtml(t)}
         ${t.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(t.notas)}</div></div>` : ''}
+        <div class="dato"><div class="k">Mapa</div><div class="v">${t.latitud != null ? '✓ Con ubicación' : '<span class="muted">Sin ubicación (editá el teatro)</span>'}</div></div>
       </div>
       <div class="acciones">
         <button class="btn primario" data-action="editarTeatro" data-id="${t.id}">Editar</button>
         <button class="btn peligro" data-action="borrarTeatro" data-id="${t.id}">Borrar</button>
       </div>
-      <div class="seccion-titulo">Funciones en este teatro</div>
-      ${fs.length ? `<div class="lista">${fs.map(tarjetaFuncion).join('')}</div>`
+      <div class="seccion-titulo">📈 Historial</div>
+      ${historialHtml(t, fs)}
+      ${fs.length ? `<div class="lista">${fs.slice().reverse().map((f) => tarjetaFuncion(f, { conPublico: true })).join('')}</div>`
         : '<div class="vacio-msg">Todavía no hay funciones en este teatro.</div>'}`);
   }
 
@@ -542,6 +1070,15 @@
           ${campo('contacto_telefono', 'Teléfono', 'tel')}
           ${campo('contacto_email', 'Email', 'email')}
         </div>
+        <div class="panel">
+          <h3>📍 Ubicación en el mapa</h3>
+          <p class="small muted" style="margin-top:-6px">Si la dejás vacía, se busca sola por ciudad al guardar.</p>
+          <div class="fila-2">
+            ${campo('latitud', 'Latitud', 'number', 'step="any" inputmode="decimal"')}
+            ${campo('longitud', 'Longitud', 'number', 'step="any" inputmode="decimal"')}
+          </div>
+          <button type="button" class="btn bloque" data-action="geocodificar">Buscar ubicación por dirección</button>
+        </div>
         <label class="campo"><span>Notas</span><textarea name="notas">${esc(t.notas)}</textarea></label>
         <label class="check"><input type="checkbox" name="a_verificar" ${t.a_verificar ? 'checked' : ''}> Datos a verificar</label>
         <p class="error" id="form-error" hidden></p>
@@ -549,19 +1086,57 @@
       </form>`);
   }
 
+  async function buscarCoordenadas(consulta) {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=' + encodeURIComponent(consulta);
+    const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j[0] ? { lat: Number(Number(j[0].lat).toFixed(5)), lng: Number(Number(j[0].lon).toFixed(5)) } : null;
+  }
+
+  async function geocodificarForm(btn) {
+    const form = btn.form;
+    const v = (k) => form.elements[k].value.trim();
+    if (!v('ciudad') || !v('provincia')) return errorForm('Primero completá ciudad y provincia.');
+    btn.disabled = true; btn.textContent = 'Buscando…';
+    try {
+      let c = v('direccion') ? await buscarCoordenadas(`${v('direccion')}, ${v('ciudad')}, ${v('provincia')}`) : null;
+      let aprox = false;
+      if (!c) { c = await buscarCoordenadas(`${v('ciudad')}, ${v('provincia')}`); aprox = true; }
+      if (!c) { errorForm('No se encontró la ubicación. Podés cargar latitud y longitud a mano.'); return; }
+      form.elements.latitud.value = c.lat; form.elements.longitud.value = c.lng;
+      toast(aprox ? 'Ubicación de la ciudad encontrada ✓' : 'Ubicación encontrada ✓');
+    } catch (e) {
+      errorForm('No se pudo buscar la ubicación. Revisá tu conexión.');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Buscar ubicación por dirección';
+    }
+  }
+
   async function guardarTeatro(form) {
     const fd = new FormData(form);
     const txt = (k) => String(fd.get(k) || '').trim() || null;
+    const num = (k) => { const v = txt(k); return v == null ? null : Number(v); };
     const cap = txt('capacidad');
     const datos = {
       nombre: txt('nombre'), ciudad: txt('ciudad'), provincia: txt('provincia'),
       direccion: txt('direccion'), capacidad: cap ? parseInt(cap, 10) : null,
       contacto_nombre: txt('contacto_nombre'), contacto_telefono: txt('contacto_telefono'),
       contacto_email: txt('contacto_email'), notas: txt('notas'),
+      latitud: num('latitud'), longitud: num('longitud'),
       a_verificar: fd.get('a_verificar') === 'on',
     };
     if (!datos.nombre || !datos.ciudad || !datos.provincia) return errorForm('Completá nombre, ciudad y provincia.');
     if (datos.capacidad != null && (isNaN(datos.capacidad) || datos.capacidad < 0)) return errorForm('La capacidad debe ser un número.');
+    if ((datos.latitud == null) !== (datos.longitud == null) || isNaN(datos.latitud) || isNaN(datos.longitud)) {
+      return errorForm('Completá latitud y longitud, o dejá las dos vacías.');
+    }
+    if (datos.latitud == null) {
+      try {
+        const c = await buscarCoordenadas(`${datos.ciudad}, ${datos.provincia}`);
+        if (c) { datos.latitud = c.lat; datos.longitud = c.lng; }
+      } catch (e) { /* sin conexión al buscador: se guarda sin ubicación */ }
+    }
     const id = form.dataset.id;
     const q = id ? sb.from('teatros').update(datos).eq('id', id) : sb.from('teatros').insert(datos);
     await guardar(form, q);
@@ -611,23 +1186,24 @@
   }
   function cerrarModal() {
     $modal.innerHTML = '';
+    state.modalFuncionId = null;
     document.body.classList.remove('no-scroll');
   }
   function errorForm(msg) {
     const el = document.getElementById('form-error');
-    if (el) { el.textContent = msg; el.hidden = false; } else toast(msg, true);
+    if (el) { el.textContent = msg; el.hidden = false; el.scrollIntoView({ block: 'center' }); } else toast(msg, true);
   }
   async function guardar(form, consulta, despues) {
     const btn = form.querySelector('[type=submit]');
     btn.disabled = true; btn.textContent = 'Guardando…';
-    const { error } = await consulta;
+    const { data, error } = await consulta;
     if (error) {
       btn.disabled = false; btn.textContent = 'Guardar';
       return errorForm(traducirError(error));
     }
-    if (despues) await despues();
     cerrarModal();
-    await cargarDatos(); renderMain();
+    if (despues) await despues(data); else await cargarDatos();
+    renderMain();
     toast('Guardado ✓');
   }
 
@@ -639,14 +1215,36 @@
     mesSig: () => { const { y, m } = state.mes; state.mes = m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }; state.diaSel = null; renderMain(); },
     irHoy: () => { const t = new Date(); state.mes = { y: t.getFullYear(), m: t.getMonth() }; state.diaSel = hoyISO(); renderMain(); },
     dia: (el) => { state.diaSel = state.diaSel === el.dataset.dia ? null : el.dataset.dia; renderMain(); },
-    verFuncion: (el) => verFuncion(el.dataset.id),
+    verAvisos: () => verAvisos(),
+    verFuncion: (el, e) => { e.preventDefault(); verFuncion(el.dataset.id); },
+    volverFuncion: (el) => verFuncion(el.dataset.id),
     nuevaFuncion: () => formFuncion(null),
     editarFuncion: (el) => formFuncion(el.dataset.id),
     borrarFuncion: (el) => borrarFuncion(el.dataset.id),
+    agendar: (el) => agendar(el.dataset.id),
+    icsUna: (el) => {
+      const f = state.funciones.find((x) => x.id === el.dataset.id);
+      if (f) descargarIcs([f], `funcion-${nombreSeguro(f.ciudad)}-${f.fecha}.ics`);
+    },
+    exportarTodo: () => exportarTodo(),
+    icsTodas: (el) => {
+      const hoy = hoyISO();
+      const fs = state.funciones.filter((f) => f.estado !== 'cancelada' && (el.dataset.rango === 'todas' || f.fecha >= hoy));
+      descargarIcs(fs, 'gira.ics');
+    },
+    quitarItem: (el) => {
+      const f = state.funciones.find((x) => x.id === state.modalFuncionId);
+      if (!f) return;
+      const items = checklistDe(f).slice();
+      items.splice(Number(el.dataset.i), 1);
+      guardarChecklist(items);
+    },
+    borrarDoc: (el) => borrarDoc(el.dataset.ruta),
     verTeatro: (el) => verTeatro(el.dataset.id),
     nuevoTeatro: () => formTeatro(null),
     editarTeatro: (el) => formTeatro(el.dataset.id),
     borrarTeatro: (el) => borrarTeatro(el.dataset.id),
+    geocodificar: (el) => geocodificarForm(el),
     cerrar: () => cerrarModal(),
     fondo: (el, e) => { if (e.target === el) cerrarModal(); },
     salir: async () => { await sb.auth.signOut(); },
@@ -668,11 +1266,20 @@
     if (!k) return;
     if (k === 'filtroEstado') { state.filtroEstado = e.target.value; renderMain(); }
     if (k === 'verPasadas') { state.verPasadas = e.target.checked; renderMain(); }
+    if (k === 'mapaRango') { state.mapaRango = e.target.value; renderMain(); }
     if (k === 'provTeatro') { state.provTeatro = e.target.value; document.getElementById('lista-teatros').innerHTML = listaTeatros(); }
     if (k === 'teatroFuncion') {
       const t = teatroDe(e.target.value);
       if (t) e.target.form.elements.ciudad.value = t.ciudad;
     }
+    if (k === 'checkItem') {
+      const f = state.funciones.find((x) => x.id === state.modalFuncionId);
+      if (!f) return;
+      const items = checklistDe(f).map((it) => ({ ...it }));
+      items[Number(e.target.dataset.i)].hecho = e.target.checked;
+      guardarChecklist(items);
+    }
+    if (k === 'subirDoc') subirDocs(e.target);
   });
 
   document.addEventListener('input', (e) => {
@@ -700,6 +1307,13 @@
         await guardarFuncion(form);
       } else if (tipo === 'teatro') {
         await guardarTeatro(form);
+      } else if (tipo === 'checkNuevo') {
+        const texto = form.texto.value.trim();
+        const f = state.funciones.find((x) => x.id === state.modalFuncionId);
+        if (!texto || !f) return;
+        await guardarChecklist([...checklistDe(f), { texto, hecho: false }]);
+        const inp = document.querySelector('form[data-form=checkNuevo] input');
+        if (inp) inp.focus();
       } else if (tipo === 'clave') {
         const c1 = form.clave1.value; const c2 = form.clave2.value;
         if (c1.length < 6) return errorForm('La contraseña debe tener al menos 6 caracteres.');

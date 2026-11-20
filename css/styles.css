@@ -239,3 +239,60 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   max-width: calc(100% - 32px); box-shadow: 0 6px 18px rgba(0,0,0,.3);
 }
 .toast.error-toast { background: var(--danger); }
+
+/* ---------- Versión 2 ---------- */
+.fila-leyenda { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.btn-hoy { width: auto; padding: 0 12px; font-size: 14px; flex: none; }
+
+.aviso-banner {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  margin-bottom: 12px; padding: 12px 14px; border-radius: 12px; cursor: pointer; text-align: left;
+  border: 1px solid var(--opcion); background: var(--opcion-bg); color: var(--text); font-weight: 600;
+}
+.aviso-banner.grave { border-color: var(--cancelada); background: var(--cancelada-bg); }
+.aviso-banner span { color: var(--muted); font-weight: 500; }
+.aviso-box {
+  border-left: 4px solid var(--opcion); background: var(--opcion-bg); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 10px; font-size: 15px;
+}
+.aviso-box.grave { border-left-color: var(--cancelada); background: var(--cancelada-bg); }
+.dia.con-aviso .num::after { content: "•"; color: var(--cancelada); margin-left: 1px; }
+.marca-aviso { font-size: 13px; }
+
+.sub-titulo { font-size: 16px; margin: 18px 0 8px; }
+.vacio-msg.chico { padding: 12px; font-size: 14px; margin-bottom: 6px; }
+.acciones.compartir { margin-bottom: 14px; }
+.btn.whatsapp { background: #1f9d55; border-color: #1f9d55; color: #fff; }
+
+.ocupacion-num { margin-bottom: 8px; }
+.barra { height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-bottom: 6px; }
+.barra > div { height: 100%; background: var(--confirmada); border-radius: 999px; }
+
+.checklist .check-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); }
+.checklist .check-item:last-of-type { border-bottom: 0; }
+.checklist .check { margin: 0; padding: 9px 0; font-weight: 500; flex: 1; }
+.checklist .tachado { text-decoration: line-through; color: var(--muted); }
+.x { flex: none; width: 34px; height: 34px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; border-radius: 8px; }
+.check-nuevo { display: flex; gap: 8px; margin-top: 10px; }
+.check-nuevo input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+
+.dato.doc { align-items: center; }
+.dato.doc a { text-decoration: none; }
+.btn.subir { margin-bottom: 6px; }
+
+.mapa { height: 58vh; min-height: 320px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 10px; background: var(--surface-2); }
+.pin {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-width: 28px; height: 28px; padding: 0 6px; border-radius: 999px; font-size: 13px; font-weight: 800; white-space: nowrap;
+  color: #fff; background: var(--c, var(--primary)); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+.recorrido { list-style: none; margin: 0; padding: 0; }
+.recorrido .tramo { color: var(--muted); font-size: 13px; padding: 2px 0 2px 38px; }
+.parada {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px;
+}
+
+.historial { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.historial .stat b { display: block; font-size: 22px; }
+.historial .stat span { font-size: 13px; color: var(--muted); }
