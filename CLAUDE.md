@@ -76,14 +76,36 @@ Reglas para SQL nuevo:
 - La placa se regenera con `material/generar-placa.js` (Playwright + `qrcode-generator` en el scratchpad; Inter como fuente, sin emojis porque el Chromium del contenedor no tiene fuente de emojis a color).
 - Ideas que le propuse y le interesaron como próximas: 1) hoja de ruta del día para el equipo, 2) presupuesto y rentabilidad por fecha (solo admin). Otras: seguimiento de venta de entradas, contactos por fecha, opciones con vencimiento, página pública de la gira, exportar a Excel.
 
-## Ideas pendientes (proponerlas cuando venga al caso)
+## Plan de mejoras (priorizado; proponer en este orden)
 
-- Notificaciones push / email de recordatorios (hoy solo se ven dentro de la app).
-- Suscripción de calendario que se actualice sola (necesitaría una Edge Function de Supabase).
-- Contactos por función (productor local, técnico) además del contacto del teatro.
-- Presupuesto de gira por tramo (micro, avión, hotel) y comparación con lo recaudado.
-- Plantillas de checklist distintas por tipo de sala.
-- Cola de cambios sin conexión (hoy sin señal es solo lectura).
-- Exportar estadísticas a planilla (CSV/Excel).
-- Verificar los 57 teatros iniciales (capacidades aproximadas, faltan contactos).
-- Mantenimiento: si pasan 7 días sin uso, Supabase pausa el proyecto (se reactiva con "Restore project").
+Criterio: lo que más tiempo o plata le ahorra en el día a día de una gira, primero. Esfuerzo: 🟢 chico · 🟡 medio · 🔴 grande.
+
+**Etapa A — inmediatas (alto valor, poco esfuerzo)**
+1. 🟢 **Hoja de ruta del día**: botón en la función que arma un resumen (salida, llegada, prueba de sonido, función, hotel, traslado, contactos, catering) para WhatsApp y para imprimir/PDF. Ya existe casi todo el dato.
+2. 🟢 **Link de venta de entradas** por función (columna `link_entradas`) con botón copiar/compartir.
+3. 🟢 **Opciones con vencimiento**: fecha límite de la "Opción" (`opcion_vence`) + aviso en recordatorios 3 días antes.
+4. 🟢 **Contactos por fecha** (técnico local, productor local, prensa, chofer): tabla `contactos_funcion` o jsonb, con botones llamar/WhatsApp.
+5. 🟢 **Exportar a Excel/CSV** funciones, público y (solo admin) recaudación.
+
+**Etapa B — gestión y negocio (solo admin)**
+6. 🟡 **Rentabilidad por fecha**: gastos detallados por rubro (micro, vuelos, hotel, viáticos, técnica, publicidad) en `finanzas` o tabla aparte; neto por plaza y ranking de plazas más rentables en Números.
+7. 🟡 **Curva de venta de entradas**: registros fechados de vendidas (`ventas(funcion_id, fecha, vendidas)`) y gráfico comparando con fechas anteriores del mismo teatro; alerta si viene floja.
+8. 🟡 **Presupuesto de gira por tramo** y comparación con lo cobrado.
+9. 🟡 **Comparar temporadas/años** en Números.
+
+**Etapa C — equipo y comunicación**
+10. 🟡 **Comentarios por función** que el equipo sí puede escribir (tabla aparte con RLS insert para autenticados).
+11. 🟡 **Agenda de contactos general** por provincia (productores, técnicos, prensa).
+12. 🟡 **Plantillas de checklist** por tipo de fecha (sala chica/grande, festival, corporativo).
+13. 🟡 **Página pública de la gira** (solo fechas confirmadas, ciudad, teatro, link de entradas) para redes; vista o función de Supabase con datos mínimos, sin datos internos.
+
+**Etapa D — más técnicas**
+14. 🔴 **Notificaciones al celular** (Web Push en la PWA instalada + Edge Function programada).
+15. 🔴 **Calendario suscripto que se actualiza solo** (Edge Function que sirve .ics con token).
+16. 🔴 **Cola de cambios sin conexión** (hoy sin señal es solo lectura).
+
+**Pulido y mantenimiento (hacer cuando haya un rato)**
+- Verificar los 57 teatros iniciales (capacidades aproximadas, faltan contactos): se puede ofrecer una vista "Teatros a verificar" con progreso.
+- El botón flotante (+ Función) tapa el final de algunas listas: revisar margen inferior.
+- Revisar que tests viejos del scratchpad usen stubs actualizados (finanzas, tipo).
+- Si pasan 7 días sin uso, Supabase pausa el proyecto (se reactiva con "Restore project"); avisarle antes de pausas largas entre giras.
