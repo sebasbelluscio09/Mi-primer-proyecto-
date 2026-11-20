@@ -30,6 +30,7 @@
   const DISTANCIA_AVISO_KM = 600; // ciudades a más de esta distancia en días seguidos
   const DURACION_FUNCION_H = 2;
   const BUCKET = 'documentos';
+  const CATERING = { teatro: '✅ Lo pone el teatro', llevar: '🧺 Hay que llevarlo' };
 
   const $app = document.getElementById('app');
   const $modal = document.getElementById('modal-root');
@@ -483,7 +484,8 @@
         ${t.a_verificar ? ' <span class="badge verificar">a verificar</span>' : ''}</div></div>
       ${t.direccion ? `<div class="dato"><div class="k">Dirección</div><div class="v">
         <a href="${mapaLink(t)}" target="_blank" rel="noopener">${esc(t.direccion)}, ${esc(t.ciudad)} ↗</a></div></div>` : ''}
-      ${contactoHtml(t)}` : '<div class="dato"><div class="k">Teatro</div><div class="v muted">A definir</div></div>';
+      ${contactoHtml(t)}
+      ${cateringHtml(t)}` : '<div class="dato"><div class="k">Teatro</div><div class="v muted">A definir</div></div>';
 
     const logistica = [
       f.prueba_sonido && `<div class="dato"><div class="k">Prueba de sonido</div><div class="v">${horaCorta(f.prueba_sonido)} h</div></div>`,
@@ -554,6 +556,12 @@
       ${t.contacto_telefono ? `<a href="${telLink(t.contacto_telefono)}">📞 ${esc(t.contacto_telefono)}</a><br>` : ''}
       ${t.contacto_email ? `<a href="mailto:${esc(t.contacto_email)}">✉️ ${esc(t.contacto_email)}</a>` : ''}
     </div></div>`;
+  }
+
+  function cateringHtml(t) {
+    const txt = t.catering ? CATERING[t.catering] : '<span class="muted">Sin dato</span>';
+    return `<div class="dato"><div class="k">Catering</div><div class="v"><b>${txt}</b>${t.catering_notas
+      ? `<div class="multilinea small">${esc(t.catering_notas)}</div>` : ''}</div></div>`;
   }
 
   // ---------- Checklist técnico ----------
@@ -653,6 +661,7 @@
     if (f.prueba_sonido) l.push(`🎚️ Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`);
     if (f.traslado) l.push(`🚐 Traslado: ${f.traslado}`);
     if (f.hotel) l.push(`🏨 Hotel: ${f.hotel}`);
+    if (t && t.catering) l.push(`🍽️ Catering: ${CATERING[t.catering].replace(/^\S+ /, '')}${t.catering_notas ? ` — ${t.catering_notas}` : ''}`);
     if (f.notas) l.push(`📝 ${f.notas}`);
     if (t) l.push(`🗺️ ${mapaLink(t)}`);
     return l.join('\n');
@@ -681,11 +690,13 @@
     return t ? [t.nombre, t.direccion, t.ciudad, t.provincia].filter(Boolean).join(', ') : f.ciudad;
   }
   function detalleEvento(f) {
+    const t = teatroDe(f.teatro_id);
     return [
       `Estado: ${estadoLabel(f.estado)}`,
       f.prueba_sonido && `Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`,
       f.traslado && `Traslado: ${f.traslado}`,
       f.hotel && `Hotel: ${f.hotel}`,
+      t && t.catering && `Catering: ${CATERING[t.catering].replace(/^\S+ /, '')}${t.catering_notas ? ` — ${t.catering_notas}` : ''}`,
       f.notas,
     ].filter(Boolean).join('\n');
   }
@@ -1030,6 +1041,7 @@
           : `<a href="${mapaLink(t)}" target="_blank" rel="noopener" class="muted">Buscar en el mapa ↗</a>`}</div></div>
         <div class="dato"><div class="k">Capacidad</div><div class="v">${t.capacidad ? numero(t.capacidad) + ' personas' : '<span class="muted">Sin dato</span>'}</div></div>
         ${contactoHtml(t)}
+        ${cateringHtml(t)}
         ${t.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(t.notas)}</div></div>` : ''}
         <div class="dato"><div class="k">Mapa</div><div class="v">${t.latitud != null ? '✓ Con ubicación' : '<span class="muted">Sin ubicación (editá el teatro)</span>'}</div></div>
       </div>
@@ -1069,6 +1081,15 @@
           ${campo('contacto_nombre', 'Nombre')}
           ${campo('contacto_telefono', 'Teléfono', 'tel')}
           ${campo('contacto_email', 'Email', 'email')}
+        </div>
+        <div class="panel">
+          <h3>🍽️ Catering</h3>
+          <label class="campo"><span>¿Quién pone el catering?</span><select name="catering">
+            <option value="">Sin dato</option>
+            ${Object.entries(CATERING).map(([v, l]) => `<option value="${v}" ${t.catering === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select></label>
+          <label class="campo"><span>Detalle del catering</span><textarea name="catering_notas"
+            placeholder="Ej: el teatro pone agua y café; llevar sándwiches y frutas para 6 personas">${esc(t.catering_notas)}</textarea></label>
         </div>
         <div class="panel">
           <h3>📍 Ubicación en el mapa</h3>
@@ -1123,6 +1144,7 @@
       direccion: txt('direccion'), capacidad: cap ? parseInt(cap, 10) : null,
       contacto_nombre: txt('contacto_nombre'), contacto_telefono: txt('contacto_telefono'),
       contacto_email: txt('contacto_email'), notas: txt('notas'),
+      catering: txt('catering'), catering_notas: txt('catering_notas'),
       latitud: num('latitud'), longitud: num('longitud'),
       a_verificar: fd.get('a_verificar') === 'on',
     };

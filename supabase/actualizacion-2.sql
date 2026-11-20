@@ -5,6 +5,10 @@ alter table public.funciones add column if not exists checklist jsonb;
 alter table public.funciones add column if not exists entradas_vendidas integer;
 alter table public.funciones drop constraint if exists funciones_entradas_ok;
 alter table public.funciones add constraint funciones_entradas_ok check (entradas_vendidas is null or entradas_vendidas >= 0);
+alter table public.teatros add column if not exists catering text;
+alter table public.teatros add column if not exists catering_notas text;
+alter table public.teatros drop constraint if exists teatros_catering_ok;
+alter table public.teatros add constraint teatros_catering_ok check (catering is null or catering in ('teatro', 'llevar'));
 update public.teatros t
 set latitud = c.lat, longitud = c.lng
 from (values
