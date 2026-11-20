@@ -481,7 +481,8 @@
 
     const teatroHtml = t ? `
       <div class="dato"><div class="k">Teatro</div><div class="v"><b>${esc(t.nombre)}</b>
-        ${t.a_verificar ? ' <span class="badge verificar">a verificar</span>' : ''}</div></div>
+        ${t.a_verificar ? ' <span class="badge verificar">a verificar</span>' : ''}
+        ${state.isAdmin ? `<br><button class="link-btn" data-action="editarTeatro" data-id="${t.id}">✏️ Editar datos del teatro (contacto, catering…)</button>` : ''}</div></div>
       ${t.direccion ? `<div class="dato"><div class="k">Dirección</div><div class="v">
         <a href="${mapaLink(t)}" target="_blank" rel="noopener">${esc(t.direccion)}, ${esc(t.ciudad)} ↗</a></div></div>` : ''}
       ${contactoHtml(t)}
