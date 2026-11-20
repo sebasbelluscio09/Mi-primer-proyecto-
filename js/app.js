@@ -59,6 +59,10 @@
   // Público de una función: asistentes reales si se cargaron, si no las entradas vendidas.
   const plata = (n) => (n == null ? '—' : Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }));
   const DIAS_RECORDATORIO = 7;
+  const TIPOS_EVENTO = {
+    empresa: 'Empresa / corporativo', privado: 'Fiesta privada', festival: 'Festival',
+    municipio: 'Municipio / gobierno', otro: 'Otro',
+  };
   const publico = (f) => (f.asistentes != null ? f.asistentes : f.entradas_vendidas);
 
   function distanciaKm([la1, lo1], [la2, lo2]) {
@@ -149,9 +153,17 @@
   let mapa = null;
 
   const teatroDe = (id) => state.teatros.find((t) => t.id === id);
+  const esPrivado = (f) => f.tipo === 'privado';
+  // Lugar de una función con la misma forma que un teatro (nombre, dirección, ciudad, provincia).
+  const lugarDe = (f) => (esPrivado(f)
+    ? { nombre: f.lugar, direccion: f.direccion, ciudad: f.ciudad, provincia: f.provincia }
+    : teatroDe(f.teatro_id));
+  const nombreLugar = (f) => (esPrivado(f) ? (f.lugar || 'Lugar a definir') : (teatroDe(f.teatro_id)?.nombre || 'Teatro a definir'));
+  const etiquetaPlata = (f) => (esPrivado(f) ? 'Cachet' : 'Recaudación');
 
   // Coordenadas de una función: las de su teatro o, si no tiene, las de otro teatro de la misma ciudad.
   function coordsDe(f) {
+    if (f.latitud != null && f.longitud != null) return [f.latitud, f.longitud];
     const t = teatroDe(f.teatro_id);
     if (t && t.latitud != null && t.longitud != null) return [t.latitud, t.longitud];
     const c = normalizar(f.ciudad);
@@ -331,7 +343,9 @@
     let fab = '';
     if (state.vista === 'calendario') {
       html = vistaCalendario();
-      if (state.isAdmin) fab = '<button class="fab" data-action="nuevaFuncion">+ Función</button>';
+      if (state.isAdmin) fab = state.calModo === 'privados'
+        ? '<button class="fab" data-action="nuevoPrivado">+ Privado</button>'
+        : '<button class="fab" data-action="nuevaFuncion">+ Función</button>';
     } else if (state.vista === 'mapa') {
       html = vistaMapa();
     } else if (state.vista === 'estadisticas') {
@@ -365,7 +379,7 @@
       .sort(ordenFunciones).forEach((f) => {
         const faltan = [];
         if (f.estado === 'opcion') faltan.push('todavía es Opción: falta confirmar');
-        if (!f.teatro_id) faltan.push('falta elegir el teatro');
+        if (esPrivado(f) ? !f.lugar : !f.teatro_id) faltan.push(esPrivado(f) ? 'falta el lugar del evento' : 'falta elegir el teatro');
         if (!f.hora) faltan.push('falta la hora');
         if (!f.prueba_sonido) faltan.push('falta la hora de prueba de sonido');
         const items = checklistDe(f);
@@ -430,27 +444,27 @@
     const t = teatroDe(f.teatro_id);
     abrirModal(`
       <div class="modal-cab">
-        <div><h2>🎬 Cierre de función</h2><div class="sub">${esc(f.ciudad)}${t ? ` · ${esc(t.nombre)}` : ''} · ${esc(fechaCorta(f.fecha))}</div></div>
+        <div><h2>🎬 Cierre de función</h2><div class="sub">${esc(f.ciudad)} · ${esc(nombreLugar(f))} · ${esc(fechaCorta(f.fecha))}</div></div>
         <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
       </div>
       <form data-form="cierre" data-id="${f.id}" novalidate>
-        <label class="campo"><span>Personas que vinieron *</span><input type="number" name="asistentes" min="0" inputmode="numeric"
-          value="${esc(f.asistentes ?? f.entradas_vendidas)}" placeholder="Ej: 950" required></label>
+        <label class="campo"><span>Personas que vinieron${esPrivado(f) ? ' (aprox.)' : ' *'}</span><input type="number" name="asistentes" min="0" inputmode="numeric"
+          value="${esc(f.asistentes ?? f.entradas_vendidas)}" placeholder="Ej: 950" ${esPrivado(f) ? '' : 'required'}></label>
         ${t && t.capacidad ? `<p class="small muted" style="margin-top:-8px">Capacidad de la sala: ${numero(t.capacidad)}</p>` : ''}
-        <div class="fila-2">
+        ${esPrivado(f) ? '' : `<div class="fila-2">
           <label class="campo"><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0" inputmode="numeric" value="${esc(f.entradas_vendidas)}"></label>
           <label class="campo"><span>Invitaciones</span><input type="number" name="invitaciones" min="0" inputmode="numeric" value="${esc(f.invitaciones)}"></label>
-        </div>
+        </div>`}
         <div class="panel privado">
-          <h3>💰 Recaudación <span class="solo-vos">🔒 solo vos</span></h3>
+          <h3>💰 ${etiquetaPlata(f)} <span class="solo-vos">🔒 solo vos</span></h3>
           <div class="fila-2">
-            <label class="campo"><span>Recaudación ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(state.finanzas[f.id]?.recaudacion)}"></label>
+            <label class="campo"><span>${etiquetaPlata(f)} ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(state.finanzas[f.id]?.recaudacion)}"></label>
             <label class="campo"><span>Gastos ($)</span><input type="number" name="gastos" min="0" step="any" inputmode="decimal" value="${esc(state.finanzas[f.id]?.gastos)}"></label>
           </div>
         </div>
         <label class="campo"><span>¿Cómo fue?</span><textarea name="comentario_cierre"
           placeholder="Ej: sala muy cálida, buen sonido; el camarín era chico">${esc(f.comentario_cierre)}</textarea></label>
-        <p class="small muted">Al guardar, la función queda como <b>Realizada</b> y suma al historial del teatro.</p>
+        <p class="small muted">Al guardar, la fecha queda como <b>Realizada</b>${esPrivado(f) ? '' : ' y suma al historial del teatro'}.</p>
         <p class="error" id="form-error" hidden></p>
         <button class="btn primario bloque" type="submit">Guardar cierre</button>
       </form>`);
@@ -459,16 +473,17 @@
   async function guardarCierre(form) {
     const fd = new FormData(form);
     const n = (k) => { const v = String(fd.get(k) || '').trim(); return v === '' ? null : parseInt(v, 10); };
+    const f = state.funciones.find((x) => x.id === form.dataset.id) || {};
     const datos = {
-      asistentes: n('asistentes'), entradas_vendidas: n('entradas_vendidas'), invitaciones: n('invitaciones'),
-      comentario_cierre: String(fd.get('comentario_cierre') || '').trim() || null, estado: 'realizada',
+      asistentes: n('asistentes'), comentario_cierre: String(fd.get('comentario_cierre') || '').trim() || null, estado: 'realizada',
     };
-    if (datos.asistentes == null) return errorForm('Cargá cuántas personas vinieron.');
+    if (!esPrivado(f)) { datos.entradas_vendidas = n('entradas_vendidas'); datos.invitaciones = n('invitaciones'); }
+    if (datos.asistentes == null && !esPrivado(f)) return errorForm('Cargá cuántas personas vinieron.');
     if ([datos.asistentes, datos.entradas_vendidas, datos.invitaciones].some((v) => v != null && (isNaN(v) || v < 0))) {
       return errorForm('Los números no pueden ser negativos.');
     }
     const fin = { recaudacion: dinero(fd.get('recaudacion')), gastos: dinero(fd.get('gastos')) };
-    if ([fin.recaudacion, fin.gastos].some((v) => v != null && (isNaN(v) || v < 0))) return errorForm('Revisá recaudación y gastos.');
+    if ([fin.recaudacion, fin.gastos].some((v) => v != null && (isNaN(v) || v < 0))) return errorForm('Revisá los montos.');
     const id = form.dataset.id;
     const tocaFinanzas = fin.recaudacion != null || fin.gastos != null || state.finanzas[id];
     if (tocaFinanzas) {
@@ -483,11 +498,11 @@
   // ---------- Recaudación (solo administrador) ----------
   function finanzasHtml(f) {
     const r = state.finanzas[f.id];
-    const editar = `<button class="link-btn" data-action="editarFinanzas" data-id="${f.id}">✏️ ${r ? 'Editar' : 'Cargar recaudación'}</button>`;
+    const editar = `<button class="link-btn" data-action="editarFinanzas" data-id="${f.id}">✏️ ${r ? 'Editar' : `Cargar ${etiquetaPlata(f).toLowerCase()}`}</button>`;
     if (!r) return `<div class="vacio-msg chico">Sin datos. ${editar}</div>`;
     const neto = r.recaudacion != null ? Number(r.recaudacion) - Number(r.gastos || 0) : null;
     return `<div class="datos privado">
-      <div class="dato"><div class="k">Recaudación</div><div class="v"><b>${plata(r.recaudacion)}</b></div></div>
+      <div class="dato"><div class="k">${etiquetaPlata(f)}</div><div class="v"><b>${plata(r.recaudacion)}</b></div></div>
       <div class="dato"><div class="k">Gastos</div><div class="v">${plata(r.gastos)}</div></div>
       <div class="dato"><div class="k">Neto</div><div class="v"><b>${plata(neto)}</b></div></div>
       ${r.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(r.notas)}</div></div>` : ''}
@@ -501,15 +516,15 @@
     const r = state.finanzas[id] || {};
     abrirModal(`
       <div class="modal-cab">
-        <div><h2>💰 Recaudación</h2><div class="sub">${esc(f.ciudad)} · ${esc(fechaCorta(f.fecha))} · 🔒 solo vos</div></div>
+        <div><h2>💰 ${etiquetaPlata(f)}</h2><div class="sub">${esc(f.ciudad)} · ${esc(fechaCorta(f.fecha))} · 🔒 solo vos</div></div>
         <button class="btn-icono" data-action="volverFuncion" data-id="${f.id}" aria-label="Volver">✕</button>
       </div>
       <form data-form="finanzas" data-id="${f.id}" novalidate>
         <div class="fila-2">
-          <label class="campo"><span>Recaudación ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(r.recaudacion)}"></label>
+          <label class="campo"><span>${etiquetaPlata(f)} ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(r.recaudacion)}"></label>
           <label class="campo"><span>Gastos ($)</span><input type="number" name="gastos" min="0" step="any" inputmode="decimal" value="${esc(r.gastos)}"></label>
         </div>
-        <label class="campo"><span>Notas</span><textarea name="notas" placeholder="Ej: 70/30 con el teatro, se cobra a 15 días">${esc(r.notas)}</textarea></label>
+        <label class="campo"><span>Notas</span><textarea name="notas" placeholder="${esPrivado(f) ? 'Ej: 50% de adelanto, resto contra show' : 'Ej: 70/30 con el teatro, se cobra a 15 días'}">${esc(r.notas)}</textarea></label>
         <p class="small muted">Estos datos están protegidos en la base: tu equipo no puede verlos.</p>
         <p class="error" id="form-error" hidden></p>
         <button class="btn primario bloque" type="submit">Guardar</button>
@@ -528,8 +543,25 @@
     const seg = `<div class="segmented" role="tablist">
       <button data-action="calModo" data-modo="mes" class="${state.calModo === 'mes' ? 'activo' : ''}">Mes</button>
       <button data-action="calModo" data-modo="lista" class="${state.calModo === 'lista' ? 'activo' : ''}">Lista</button>
+      <button data-action="calModo" data-modo="privados" class="${state.calModo === 'privados' ? 'activo' : ''}">🎤 Privados</button>
     </div>`;
-    return seg + bannerRecordatorios() + bannerCierre() + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
+    const vista = state.calModo === 'mes' ? vistaMes() : state.calModo === 'lista' ? vistaLista() : vistaPrivados();
+    return seg + bannerRecordatorios() + bannerCierre() + bannerAvisos() + vista;
+  }
+
+  function vistaPrivados() {
+    const hoy = hoyISO();
+    const ps = state.funciones.filter(esPrivado).sort(ordenFunciones);
+    const prox = ps.filter((f) => f.fecha >= hoy);
+    const pasados = ps.filter((f) => f.fecha < hoy).reverse();
+    if (!ps.length) {
+      return `<div class="vacio-msg">Todavía no hay eventos privados.${state.isAdmin
+        ? '<br>Tocá “+ Privado” para cargar una contratación de empresa, fiesta, festival o municipio.' : ''}</div>`;
+    }
+    return `<p class="small muted">${prox.length} próximo(s) · ${pasados.length} realizado(s) o pasado(s)</p>
+      <div class="seccion-titulo">Próximos</div>
+      ${prox.length ? `<div class="lista">${prox.map((f) => tarjetaFuncion(f)).join('')}</div>` : '<div class="vacio-msg chico">No hay eventos privados próximos.</div>'}
+      ${pasados.length ? `<div class="seccion-titulo">Anteriores</div><div class="lista">${pasados.map((f) => tarjetaFuncion(f, { conPublico: true })).join('')}</div>` : ''}`;
   }
 
   function leyenda() {
@@ -555,7 +587,7 @@
       const conAviso = fs.some((f) => state.avisosPorFuncion[f.id]);
       const clases = ['dia', iso === hoy ? 'hoy' : '', iso === state.diaSel ? 'sel' : '', conAviso ? 'con-aviso' : ''].join(' ');
       const chips = fs.slice(0, 2).map((f) =>
-        `<span class="chip est-${f.estado}">${esc(f.ciudad)}</span>`).join('');
+        `<span class="chip est-${f.estado}">${esPrivado(f) ? '🎤' : ''}${esc(f.ciudad)}</span>`).join('');
       const mas = fs.length > 2 ? `<span class="mas">+${fs.length - 2}</span>` : '';
       celdas += `<button class="${clases}" data-action="dia" data-dia="${iso}"
         aria-label="${esc(fechaLarga(iso))}${fs.length ? `, ${fs.length} función(es)` : ''}">
@@ -622,7 +654,9 @@
   function tarjetaFuncion(f, { conPublico = false } = {}) {
     const d = aFecha(f.fecha);
     const t = teatroDe(f.teatro_id);
-    const partes = [t ? t.nombre : 'Teatro a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`];
+    const partes = esPrivado(f)
+      ? [f.cliente, f.lugar || 'Lugar a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`]
+      : [t ? t.nombre : 'Teatro a definir', horaCorta(f.hora) && `${horaCorta(f.hora)} h`];
     if (conPublico && publico(f) != null) partes.push(`${numero(publico(f))} personas`);
     const aviso = state.avisosPorFuncion[f.id] ? '<span class="marca-aviso" title="Tiene avisos">⚠️</span> ' : '';
     return `<button class="card funcion est-${f.estado}" data-action="verFuncion" data-id="${f.id}">
@@ -632,7 +666,7 @@
         <span class="ma">${MESES[d.getMonth()].slice(0, 3)}</span>
       </div>
       <div class="card-body">
-        <div class="card-title">${aviso}${esc(f.ciudad)}</div>
+        <div class="card-title">${aviso}${esPrivado(f) ? '🎤 ' : ''}${esc(f.ciudad)}</div>
         <div class="card-sub">${esc(partes.filter(Boolean).join(' · '))}</div>
       </div>
       <span class="badge est-${f.estado}">${estadoLabel(f.estado)}</span>
@@ -671,6 +705,15 @@
       ${contactoHtml(t)}
       ${cateringHtml(t)}` : '<div class="dato"><div class="k">Teatro</div><div class="v muted">A definir</div></div>';
 
+    const privadoHtml = `
+      <div class="dato"><div class="k">Tipo</div><div class="v"><b>🎤 Evento privado</b>${f.evento_tipo
+        ? ` · ${esc(TIPOS_EVENTO[f.evento_tipo] || f.evento_tipo)}` : ''}</div></div>
+      ${f.cliente ? `<div class="dato"><div class="k">Cliente</div><div class="v"><b>${esc(f.cliente)}</b></div></div>` : ''}
+      <div class="dato"><div class="k">Lugar</div><div class="v">${f.lugar ? esc(f.lugar) : '<span class="muted">A definir</span>'}</div></div>
+      ${f.direccion || f.lugar ? `<div class="dato"><div class="k">Dirección</div><div class="v">
+        <a href="${mapaLink(lugarDe(f))}" target="_blank" rel="noopener">${esc(f.direccion || 'Ver en el mapa')}, ${esc(f.ciudad)} ↗</a></div></div>` : ''}
+      ${contactoHtml(f).replace('>Contacto<', '>Organizador<')}`;
+
     const logistica = [
       f.prueba_sonido && `<div class="dato"><div class="k">Prueba de sonido</div><div class="v">${horaCorta(f.prueba_sonido)} h</div></div>`,
       f.traslado && `<div class="dato"><div class="k">Traslado</div><div class="v multilinea">${esc(f.traslado)}</div></div>`,
@@ -693,7 +736,7 @@
       <div class="datos">
         <div class="dato"><div class="k">Estado</div><div class="v"><span class="badge est-${f.estado}">${estadoLabel(f.estado)}</span></div></div>
         <div class="dato"><div class="k">Hora</div><div class="v">${f.hora ? horaCorta(f.hora) + ' h' : '<span class="muted">A definir</span>'}</div></div>
-        ${teatroHtml}
+        ${esPrivado(f) ? privadoHtml : teatroHtml}
         ${f.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(f.notas)}</div></div>` : ''}
       </div>
 
@@ -701,10 +744,9 @@
         ? `<button class="btn primario bloque" data-action="cerrarFuncion" data-id="${f.id}" style="margin-bottom:14px">🎬 Cerrar función: cargar cuánta gente vino</button>` : ''}
       ${f.estado === 'realizada' ? `<h3 class="sub-titulo">🎬 Cómo fue</h3>${cierreHtml(f, t)}` : ''}
 
-      <h3 class="sub-titulo">🎟️ Entradas</h3>
-      ${entradasHtml(f, t)}
+      ${esPrivado(f) ? '' : `<h3 class="sub-titulo">🎟️ Entradas</h3>${entradasHtml(f, t)}`}
 
-      ${state.isAdmin ? `<h3 class="sub-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></h3>${finanzasHtml(f)}` : ''}
+      ${state.isAdmin ? `<h3 class="sub-titulo">💰 ${etiquetaPlata(f)} <span class="solo-vos">🔒 solo vos</span></h3>${finanzasHtml(f)}` : ''}
 
       <h3 class="sub-titulo">🚐 Logística</h3>
       ${logistica ? `<div class="datos">${logistica}</div>`
@@ -858,16 +900,17 @@
 
   // ---------- Compartir y exportar ----------
   function textoWhatsApp(f) {
-    const t = teatroDe(f.teatro_id);
-    const l = [`🎭 *${f.ciudad}* — ${capitalizar(fechaLarga(f.fecha))}${f.hora ? `, ${horaCorta(f.hora)} h` : ''}`];
-    if (t) l.push(`📍 ${t.nombre}${t.direccion ? ` — ${t.direccion}` : ''}`);
+    const t = lugarDe(f);
+    const l = [`${esPrivado(f) ? '🎤' : '🎭'} *${f.ciudad}* — ${capitalizar(fechaLarga(f.fecha))}${f.hora ? `, ${horaCorta(f.hora)} h` : ''}`];
+    if (esPrivado(f)) l.push(`Evento privado${f.evento_tipo ? ` (${TIPOS_EVENTO[f.evento_tipo] || f.evento_tipo})` : ''}${f.cliente ? ` — ${f.cliente}` : ''}`);
+    if (t && (t.nombre || t.direccion)) l.push(`📍 ${[t.nombre, t.direccion].filter(Boolean).join(' — ')}`);
     l.push(`Estado: ${estadoLabel(f.estado)}`);
     if (f.prueba_sonido) l.push(`🎚️ Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`);
     if (f.traslado) l.push(`🚐 Traslado: ${f.traslado}`);
     if (f.hotel) l.push(`🏨 Hotel: ${f.hotel}`);
     if (t && t.catering) l.push(`🍽️ Catering: ${CATERING[t.catering].replace(/^\S+ /, '')}${t.catering_notas ? ` — ${t.catering_notas}` : ''}`);
     if (f.notas) l.push(`📝 ${f.notas}`);
-    if (t) l.push(`🗺️ ${mapaLink(t)}`);
+    if (t && (t.nombre || t.direccion)) l.push(`🗺️ ${mapaLink(t)}`);
     return l.join('\n');
   }
 
@@ -886,17 +929,18 @@
   }
 
   function tituloEvento(f) {
-    const t = teatroDe(f.teatro_id);
-    return `🎭 ${f.ciudad}${t ? ` – ${t.nombre}` : ''}${f.estado === 'opcion' ? ' (Opción)' : ''}${f.estado === 'cancelada' ? ' (CANCELADA)' : ''}`;
+    const nombre = esPrivado(f) ? (f.cliente || f.lugar) : teatroDe(f.teatro_id)?.nombre;
+    return `${esPrivado(f) ? '🎤' : '🎭'} ${f.ciudad}${nombre ? ` – ${nombre}` : ''}${f.estado === 'opcion' ? ' (Opción)' : ''}${f.estado === 'cancelada' ? ' (CANCELADA)' : ''}`;
   }
   function lugarEvento(f) {
-    const t = teatroDe(f.teatro_id);
-    return t ? [t.nombre, t.direccion, t.ciudad, t.provincia].filter(Boolean).join(', ') : f.ciudad;
+    const t = lugarDe(f);
+    return t && (t.nombre || t.direccion) ? [t.nombre, t.direccion, t.ciudad, t.provincia].filter(Boolean).join(', ') : f.ciudad;
   }
   function detalleEvento(f) {
     const t = teatroDe(f.teatro_id);
     return [
       `Estado: ${estadoLabel(f.estado)}`,
+      esPrivado(f) && `Evento privado${f.cliente ? `: ${f.cliente}` : ''}${f.contacto_nombre ? ` · Organizador: ${f.contacto_nombre}${f.contacto_telefono ? ` ${f.contacto_telefono}` : ''}` : ''}`,
       f.prueba_sonido && `Prueba de sonido: ${horaCorta(f.prueba_sonido)} h`,
       f.traslado && `Traslado: ${f.traslado}`,
       f.hotel && `Hotel: ${f.hotel}`,
@@ -996,29 +1040,55 @@
       .join('');
   }
 
-  function formFuncion(id) {
+  function formFuncion(id, tipoInicial = 'teatro') {
     const f = id ? state.funciones.find((x) => x.id === id)
-      : { fecha: state.diaSel || hoyISO(), hora: '21:00', estado: 'opcion', ciudad: '', teatro_id: null };
+      : { fecha: state.diaSel || hoyISO(), hora: '21:00', estado: 'opcion', ciudad: '', teatro_id: null, tipo: tipoInicial };
     if (!f) return;
+    const priv = esPrivado(f);
     abrirModal(`
       <div class="modal-cab">
-        <h2>${id ? 'Editar función' : 'Nueva función'}</h2>
+        <h2>${id ? 'Editar fecha' : 'Nueva fecha'}</h2>
         <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
       </div>
       <form data-form="funcion" data-id="${id || ''}" novalidate>
+        <div class="segmented tipo-sel" role="radiogroup" aria-label="Tipo de fecha">
+          <label><input type="radio" name="tipo" value="teatro" data-change="tipoFuncion" ${priv ? '' : 'checked'}>🎭 Teatro</label>
+          <label><input type="radio" name="tipo" value="privado" data-change="tipoFuncion" ${priv ? 'checked' : ''}>🎤 Evento privado</label>
+        </div>
         <div class="fila-2">
           <label class="campo"><span>Fecha *</span><input type="date" name="fecha" value="${esc(f.fecha)}" required></label>
           <label class="campo"><span>Hora</span><input type="time" name="hora" value="${esc(horaCorta(f.hora))}"></label>
         </div>
-        <label class="campo"><span>Teatro</span>
-          <select name="teatro_id" data-change="teatroFuncion">${opcionesTeatros(f.teatro_id)}</select></label>
-        <div id="info-teatro">${infoTeatroHtml(f.teatro_id, f.id)}</div>
+        <div class="bloque-teatro" ${priv ? 'hidden' : ''}>
+          <label class="campo"><span>Teatro</span>
+            <select name="teatro_id" data-change="teatroFuncion">${opcionesTeatros(f.teatro_id)}</select></label>
+          <div id="info-teatro">${infoTeatroHtml(f.teatro_id, f.id)}</div>
+        </div>
         <label class="campo"><span>Ciudad *</span><input name="ciudad" value="${esc(f.ciudad)}" required
-          placeholder="Se completa sola al elegir teatro"></label>
+          placeholder="Ej: Pilar (con teatro se completa sola)"></label>
+        <div class="bloque-privado" ${priv ? '' : 'hidden'}>
+          <label class="campo"><span>Tipo de evento</span><select name="evento_tipo">
+            <option value="">Elegir…</option>
+            ${Object.entries(TIPOS_EVENTO).map(([v, l]) => `<option value="${v}" ${f.evento_tipo === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select></label>
+          <label class="campo"><span>Cliente / quien contrata</span><input name="cliente" value="${esc(f.cliente)}" placeholder="Ej: Banco Nación, Fiesta de la Vendimia"></label>
+          <label class="campo"><span>Lugar</span><input name="lugar" value="${esc(f.lugar)}" placeholder="Ej: Salón Hotel Sheraton, Predio ferial"></label>
+          <label class="campo"><span>Dirección</span><input name="direccion" value="${esc(f.direccion)}"></label>
+          <label class="campo"><span>Provincia</span><select name="provincia">
+            <option value="">Elegir…</option>
+            ${PROVINCIAS.map((p) => `<option ${f.provincia === p ? 'selected' : ''}>${p}</option>`).join('')}
+          </select></label>
+          <div class="panel">
+            <h3>Organizador / contacto</h3>
+            <label class="campo"><span>Nombre</span><input name="contacto_nombre" value="${esc(f.contacto_nombre)}"></label>
+            <label class="campo"><span>Teléfono</span><input type="tel" name="contacto_telefono" value="${esc(f.contacto_telefono)}"></label>
+            <label class="campo"><span>Email</span><input type="email" name="contacto_email" value="${esc(f.contacto_email)}"></label>
+          </div>
+        </div>
         <label class="campo"><span>Estado</span>
           <select name="estado">${ESTADOS.map((e) =>
             `<option value="${e.v}" ${f.estado === e.v ? 'selected' : ''}>${e.label}</option>`).join('')}</select></label>
-        <label class="campo"><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0"
+        <label class="campo bloque-teatro" ${priv ? 'hidden' : ''}><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0"
           inputmode="numeric" value="${esc(f.entradas_vendidas)}" placeholder="Ej: 850"></label>
         <div class="panel">
           <h3>🚐 Logística</h3>
@@ -1036,20 +1106,38 @@
     const fd = new FormData(form);
     const txt = (k) => String(fd.get(k) || '').trim() || null;
     const ent = txt('entradas_vendidas');
+    const priv = fd.get('tipo') === 'privado';
     const datos = {
+      tipo: priv ? 'privado' : 'teatro',
       fecha: fd.get('fecha'),
       hora: fd.get('hora') || null,
-      teatro_id: fd.get('teatro_id') || null,
+      teatro_id: priv ? null : (fd.get('teatro_id') || null),
       ciudad: txt('ciudad'),
       estado: fd.get('estado'),
-      entradas_vendidas: ent ? parseInt(ent, 10) : null,
+      entradas_vendidas: !priv && ent ? parseInt(ent, 10) : null,
       prueba_sonido: fd.get('prueba_sonido') || null,
       traslado: txt('traslado'),
       hotel: txt('hotel'),
       notas: txt('notas'),
     };
+    const camposPrivado = ['evento_tipo', 'cliente', 'lugar', 'direccion', 'provincia', 'contacto_nombre', 'contacto_telefono', 'contacto_email'];
+    camposPrivado.forEach((k) => { datos[k] = priv ? txt(k) : null; });
     if (!datos.fecha) return errorForm('Elegí una fecha.');
-    if (!datos.ciudad) return errorForm('Escribí la ciudad (o elegí un teatro).');
+    if (!datos.ciudad) return errorForm(priv ? 'Escribí la ciudad del evento.' : 'Escribí la ciudad (o elegí un teatro).');
+    const id0 = form.dataset.id;
+    const previa = id0 ? state.funciones.find((x) => x.id === id0) : null;
+    if (!priv) { datos.latitud = null; datos.longitud = null; }
+    else if (previa && esPrivado(previa) && previa.latitud != null && previa.direccion === datos.direccion
+      && previa.ciudad === datos.ciudad && previa.provincia === datos.provincia) {
+      datos.latitud = previa.latitud; datos.longitud = previa.longitud;
+    } else {
+      datos.latitud = null; datos.longitud = null;
+      try {
+        const region = [datos.ciudad, datos.provincia].filter(Boolean).join(', ');
+        const c = (datos.direccion && await buscarCoordenadas(`${datos.direccion}, ${region}`)) || await buscarCoordenadas(region);
+        if (c) { datos.latitud = c.lat; datos.longitud = c.lng; }
+      } catch (e) { /* sin conexión al buscador: se guarda sin ubicación */ }
+    }
     if (datos.entradas_vendidas != null && (isNaN(datos.entradas_vendidas) || datos.entradas_vendidas < 0)) {
       return errorForm('Las entradas vendidas deben ser un número.');
     }
@@ -1068,7 +1156,7 @@
 
   async function borrarFuncion(id) {
     const f = state.funciones.find((x) => x.id === id);
-    if (!f || !confirm(`¿Borrar la función de ${f.ciudad} del ${fechaLarga(f.fecha)}?\nEsta acción no se puede deshacer.`)) return;
+    if (!f || !confirm(`¿Borrar ${esPrivado(f) ? 'el evento privado' : 'la función'} de ${f.ciudad} del ${fechaLarga(f.fecha)}?\nEsta acción no se puede deshacer.`)) return;
     const { error } = await sb.from('funciones').delete().eq('id', id);
     if (error) return toast(traducirError(error), true);
     // Borrar también sus documentos adjuntos (si los hay)
@@ -1204,7 +1292,7 @@
     // Por provincia
     const porProv = {};
     conPub.forEach((f) => {
-      const prov = teatroDe(f.teatro_id)?.provincia || 'Sin teatro';
+      const prov = teatroDe(f.teatro_id)?.provincia || f.provincia || 'Sin provincia';
       porProv[prov] = porProv[prov] || { valor: 0, n: 0 };
       porProv[prov].valor += publico(f); porProv[prov].n += 1;
     });
@@ -1244,7 +1332,7 @@
         <div class="tile"><b>${conPub.length ? numero(Math.round(total / conPub.length)) : '—'}</b><span>promedio por función</span></div>
         <div class="tile"><b>${ocupProm != null ? ocupProm + '%' : '—'}</b><span>ocupación promedio</span></div>
       </div>
-      <p class="small muted">Próximamente: ${proximas} confirmada(s) y ${opciones} opción(es).
+      <p class="small muted">${hechas.some(esPrivado) ? `Incluye ${hechas.filter(esPrivado).length} evento(s) privado(s). ` : ''}Próximamente: ${proximas} confirmada(s) y ${opciones} opción(es).
         ${hechas.length > conPub.length ? ` · ${hechas.length - conPub.length} función(es) realizada(s) sin público cargado.` : ''}</p>
       ${state.isAdmin ? statsPlata(enRango) : ''}
       <div class="seccion-titulo">Público por provincia</div>
@@ -1260,7 +1348,7 @@
   function statsPlata(enRango) {
     const filas = state.funciones.filter((f) => enRango(f) && f.estado !== 'cancelada' && state.finanzas[f.id]?.recaudacion != null);
     if (!filas.length) {
-      return `<div class="seccion-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></div>
+      return `<div class="seccion-titulo">💰 Recaudación y cachets <span class="solo-vos">🔒 solo vos</span></div>
         <div class="vacio-msg chico">Todavía no cargaste recaudación. Se carga al cerrar cada función.</div>`;
     }
     const rec = filas.reduce((a, f) => a + Number(state.finanzas[f.id].recaudacion), 0);
@@ -1271,9 +1359,9 @@
       const [y, m] = k.split('-').map(Number);
       return { nombre: `${capitalizar(MESES[m - 1].slice(0, 3))} ${y}`, valor: Math.round(porMes[k]) };
     });
-    return `<div class="seccion-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></div>
+    return `<div class="seccion-titulo">💰 Recaudación y cachets <span class="solo-vos">🔒 solo vos</span></div>
       <div class="tiles privado">
-        <div class="tile"><b>${plata(rec)}</b><span>recaudación total</span></div>
+        <div class="tile"><b>${plata(rec)}</b><span>total cobrado</span></div>
         <div class="tile"><b>${plata(rec - gas)}</b><span>neto (menos gastos)</span></div>
         <div class="tile"><b>${plata(rec / filas.length)}</b><span>promedio por función</span></div>
         <div class="tile"><b>${numero(filas.length)}</b><span>funciones con datos</span></div>
@@ -1584,6 +1672,7 @@
     verFuncion: (el, e) => { e.preventDefault(); verFuncion(el.dataset.id); },
     volverFuncion: (el) => verFuncion(el.dataset.id),
     nuevaFuncion: () => formFuncion(null),
+    nuevoPrivado: () => formFuncion(null, 'privado'),
     editarFuncion: (el) => formFuncion(el.dataset.id),
     borrarFuncion: (el) => borrarFuncion(el.dataset.id),
     agendar: (el) => agendar(el.dataset.id),
@@ -1634,6 +1723,11 @@
     if (k === 'statsAnio') { state.statsAnio = e.target.value; renderMain(); }
     if (k === 'mapaRango') { state.mapaRango = e.target.value; renderMain(); }
     if (k === 'provTeatro') { state.provTeatro = e.target.value; document.getElementById('lista-teatros').innerHTML = listaTeatros(); }
+    if (k === 'tipoFuncion') {
+      const priv = e.target.value === 'privado';
+      e.target.form.querySelectorAll('.bloque-teatro').forEach((el) => { el.hidden = priv; });
+      e.target.form.querySelectorAll('.bloque-privado').forEach((el) => { el.hidden = !priv; });
+    }
     if (k === 'teatroFuncion') {
       const t = teatroDe(e.target.value);
       if (t) e.target.form.elements.ciudad.value = t.ciudad;

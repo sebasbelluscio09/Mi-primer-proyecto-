@@ -45,6 +45,11 @@ Igual que antes: copiá [`supabase/actualizacion-3.sql`](supabase/actualizacion-
 Crea la tabla de recaudación, protegida para que solo los administradores la vean.
 Copiá [`supabase/actualizacion-4.sql`](supabase/actualizacion-4.sql), pegalo en una hoja nueva del SQL Editor y tocá **Run**.
 
+## Paso 2.9 · Actualización para eventos privados (versión 5)
+
+Agrega el tipo de fecha (teatro / evento privado) y los datos del cliente, lugar y organizador.
+Copiá [`supabase/actualizacion-5.sql`](supabase/actualizacion-5.sql), pegalo en una hoja nueva del SQL Editor y tocá **Run**.
+
 ## Paso 3 · Crear los usuarios (vos y tu equipo)
 
 1. Menú izquierdo → **Authentication** → **Users** → botón **Add user** → **Create new user**.

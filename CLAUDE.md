@@ -31,7 +31,7 @@ Desde el contenedor de Claude **no hay acceso de red a Supabase** (proxy 403): n
 - `@supabase/supabase-js@2.117.3` (UMD desde jsDelivr). Leaflet 1.9.4 desde unpkg (se carga solo al abrir el Mapa). Mapas de OpenStreetMap. Geocodificación con Nominatim (solo al guardar teatros).
 - Ingreso con **email + contraseña** (no magic link: el SMTP gratuito de Supabase no manda a externos). El admin crea usuarios en Supabase → Add user → "Auto Confirm User". **Registro público desactivado** ("Allow new users to sign up" apagado).
 - Roles: tabla `admins(email)` + función `es_admin()`. Todo usuario logueado lee; solo admin escribe (RLS en todas las tablas).
-- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=6`).
+- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=7`).
 
 ### Base de datos (Supabase)
 
@@ -40,6 +40,7 @@ Scripts en `supabase/`, ejecutados por el usuario en este orden (todos re-ejecut
 2. `actualizacion-2.sql`: funciones.{traslado, hotel, prueba_sonido, checklist jsonb, entradas_vendidas}; teatros.{catering ('teatro'|'llevar'), catering_notas}; coordenadas de los 57 teatros; bucket privado `documentos` + políticas.
 3. `actualizacion-3.sql`: funciones.{asistentes, invitaciones, comentario_cierre}.
 4. `actualizacion-4.sql`: tabla `finanzas(funcion_id, recaudacion, gastos, notas)` con RLS **solo admin** (el equipo no la puede leer).
+5. `actualizacion-5.sql`: funciones.tipo ('teatro'|'privado', default teatro) + datos de evento privado: evento_tipo, cliente, lugar, direccion, provincia, contacto_nombre/telefono/email, latitud/longitud (se geocodifica al guardar).
 
 Reglas para SQL nuevo:
 - Archivo nuevo `supabase/actualizacion-N.sql`, **sin comentarios `--`** (al pegarlos desde el iPhone se rompen) e **idempotente** (`if not exists`, `drop policy if exists`, etc.).
@@ -58,6 +59,7 @@ Reglas para SQL nuevo:
 - Al programar en un teatro se muestra cómo fue la última vez.
 - Pestaña **Números**: público total, promedio, ocupación, por provincia, por mes, mejores teatros.
 - **Recaudación / gastos / neto** solo para el admin (en función, cierre y Números). Nunca va en WhatsApp ni en el .ics.
+- **Eventos privados** (empresas, fiestas, festivales, municipios): en el formulario se elige 🎭 Teatro / 🎤 Evento privado; en Calendario hay un tercer botón "🎤 Privados" con su lista y botón "+ Privado". En privados, "Recaudación" se llama **Cachet** (misma tabla `finanzas`), no hay sección Entradas y el cierre no exige asistentes. Se marcan con 🎤 en calendario, tarjetas, WhatsApp y .ics.
 - **Recordatorios** (solo admin): funciones de los próximos 7 días con algo pendiente.
 - El equipo (no admin) ve calendario, mapa, números y detalle de funciones en modo lectura; no ve Teatros, recaudación ni recordatorios.
 

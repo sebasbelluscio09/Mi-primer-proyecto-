@@ -1,0 +1,13 @@
+alter table public.funciones add column if not exists tipo text not null default 'teatro';
+alter table public.funciones drop constraint if exists funciones_tipo_ok;
+alter table public.funciones add constraint funciones_tipo_ok check (tipo in ('teatro', 'privado'));
+alter table public.funciones add column if not exists evento_tipo text;
+alter table public.funciones add column if not exists cliente text;
+alter table public.funciones add column if not exists lugar text;
+alter table public.funciones add column if not exists direccion text;
+alter table public.funciones add column if not exists provincia text;
+alter table public.funciones add column if not exists contacto_nombre text;
+alter table public.funciones add column if not exists contacto_telefono text;
+alter table public.funciones add column if not exists contacto_email text;
+alter table public.funciones add column if not exists latitud double precision;
+alter table public.funciones add column if not exists longitud double precision;
