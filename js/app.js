@@ -57,6 +57,8 @@
   const ordenFunciones = (a, b) => (a.fecha + (a.hora || '')).localeCompare(b.fecha + (b.hora || ''));
   const capitalizar = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   // Público de una función: asistentes reales si se cargaron, si no las entradas vendidas.
+  const plata = (n) => (n == null ? '—' : Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }));
+  const DIAS_RECORDATORIO = 7;
   const publico = (f) => (f.asistentes != null ? f.asistentes : f.entradas_vendidas);
 
   function distanciaKm([la1, lo1], [la2, lo2]) {
@@ -128,6 +130,7 @@
     isAdmin: false,
     teatros: [],
     funciones: [],
+    finanzas: {},
     avisos: [],
     avisosPorFuncion: {},
     vista: 'calendario',
@@ -208,6 +211,11 @@
     if (f.error) throw f.error;
     state.teatros = t.data;
     state.funciones = f.data;
+    state.finanzas = {};
+    if (state.isAdmin) {
+      const fin = await sb.from('finanzas').select('*');
+      if (!fin.error) fin.data.forEach((r) => { state.finanzas[r.funcion_id] = r; });
+    }
     calcularAvisos();
   }
 
@@ -224,6 +232,7 @@
     canal = sb.channel('cambios-gira')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'funciones' }, recargarPronto)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teatros' }, recargarPronto)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'finanzas' }, recargarPronto)
       .subscribe();
   }
 
@@ -347,6 +356,47 @@
       ⚠️ ${av.length} aviso${av.length > 1 ? 's' : ''} en la gira <span>Ver ›</span></button>`;
   }
 
+  // ---------- Recordatorios (solo administrador) ----------
+  function recordatorios() {
+    const hoy = hoyISO();
+    const limite = sumarDias(hoy, DIAS_RECORDATORIO);
+    const lista = [];
+    state.funciones.filter((f) => f.fecha >= hoy && f.fecha <= limite && f.estado !== 'cancelada' && f.estado !== 'realizada')
+      .sort(ordenFunciones).forEach((f) => {
+        const faltan = [];
+        if (f.estado === 'opcion') faltan.push('todavía es Opción: falta confirmar');
+        if (!f.teatro_id) faltan.push('falta elegir el teatro');
+        if (!f.hora) faltan.push('falta la hora');
+        if (!f.prueba_sonido) faltan.push('falta la hora de prueba de sonido');
+        const items = checklistDe(f);
+        const pend = items.filter((i) => !i.hecho).length;
+        if (pend) faltan.push(`checklist técnico: ${pend} de ${items.length} sin tildar`);
+        if (faltan.length) lista.push({ f, faltan });
+      });
+    return lista;
+  }
+
+  function bannerRecordatorios() {
+    if (!state.isAdmin) return '';
+    const r = recordatorios();
+    if (!r.length) return '';
+    return `<button class="aviso-banner recordatorio" data-action="verRecordatorios">
+      🔔 ${r.length === 1 ? '1 función' : `${r.length} funciones`} de esta semana con cosas pendientes <span>Ver ›</span></button>`;
+  }
+
+  function verRecordatorios() {
+    const r = recordatorios();
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>🔔 Pendientes de la semana</h2><div class="sub">Funciones de los próximos ${DIAS_RECORDATORIO} días</div></div>
+        <button class="btn-icono" data-action="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      ${r.length ? r.map(({ f, faltan }) => `<div class="aviso-box">
+          ${tarjetaFuncion(f)}
+          <ul class="faltan">${faltan.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+        </div>`).join('') : '<div class="vacio-msg">Nada pendiente. ¡Todo listo!</div>'}`);
+  }
+
   // ---------- Cierre de funciones ----------
   const pendientesCierre = () => state.funciones
     .filter((f) => f.estado === 'confirmada' && f.fecha < hoyISO()).sort(ordenFunciones);
@@ -391,6 +441,13 @@
           <label class="campo"><span>Entradas vendidas</span><input type="number" name="entradas_vendidas" min="0" inputmode="numeric" value="${esc(f.entradas_vendidas)}"></label>
           <label class="campo"><span>Invitaciones</span><input type="number" name="invitaciones" min="0" inputmode="numeric" value="${esc(f.invitaciones)}"></label>
         </div>
+        <div class="panel privado">
+          <h3>💰 Recaudación <span class="solo-vos">🔒 solo vos</span></h3>
+          <div class="fila-2">
+            <label class="campo"><span>Recaudación ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(state.finanzas[f.id]?.recaudacion)}"></label>
+            <label class="campo"><span>Gastos ($)</span><input type="number" name="gastos" min="0" step="any" inputmode="decimal" value="${esc(state.finanzas[f.id]?.gastos)}"></label>
+          </div>
+        </div>
         <label class="campo"><span>¿Cómo fue?</span><textarea name="comentario_cierre"
           placeholder="Ej: sala muy cálida, buen sonido; el camarín era chico">${esc(f.comentario_cierre)}</textarea></label>
         <p class="small muted">Al guardar, la función queda como <b>Realizada</b> y suma al historial del teatro.</p>
@@ -410,7 +467,61 @@
     if ([datos.asistentes, datos.entradas_vendidas, datos.invitaciones].some((v) => v != null && (isNaN(v) || v < 0))) {
       return errorForm('Los números no pueden ser negativos.');
     }
-    await guardar(form, sb.from('funciones').update(datos).eq('id', form.dataset.id));
+    const fin = { recaudacion: dinero(fd.get('recaudacion')), gastos: dinero(fd.get('gastos')) };
+    if ([fin.recaudacion, fin.gastos].some((v) => v != null && (isNaN(v) || v < 0))) return errorForm('Revisá recaudación y gastos.');
+    const id = form.dataset.id;
+    const tocaFinanzas = fin.recaudacion != null || fin.gastos != null || state.finanzas[id];
+    if (tocaFinanzas) {
+      const { error } = await sb.from('finanzas').upsert({ funcion_id: id, ...fin, notas: state.finanzas[id]?.notas ?? null });
+      if (error) return errorForm(traducirError(error));
+    }
+    await guardar(form, sb.from('funciones').update(datos).eq('id', id));
+  }
+
+  const dinero = (v) => { const t = String(v ?? '').trim(); return t === '' ? null : Number(t); };
+
+  // ---------- Recaudación (solo administrador) ----------
+  function finanzasHtml(f) {
+    const r = state.finanzas[f.id];
+    const editar = `<button class="link-btn" data-action="editarFinanzas" data-id="${f.id}">✏️ ${r ? 'Editar' : 'Cargar recaudación'}</button>`;
+    if (!r) return `<div class="vacio-msg chico">Sin datos. ${editar}</div>`;
+    const neto = r.recaudacion != null ? Number(r.recaudacion) - Number(r.gastos || 0) : null;
+    return `<div class="datos privado">
+      <div class="dato"><div class="k">Recaudación</div><div class="v"><b>${plata(r.recaudacion)}</b></div></div>
+      <div class="dato"><div class="k">Gastos</div><div class="v">${plata(r.gastos)}</div></div>
+      <div class="dato"><div class="k">Neto</div><div class="v"><b>${plata(neto)}</b></div></div>
+      ${r.notas ? `<div class="dato"><div class="k">Notas</div><div class="v multilinea">${esc(r.notas)}</div></div>` : ''}
+      <div class="dato"><div class="v">${editar}</div></div>
+    </div>`;
+  }
+
+  function formFinanzas(id) {
+    const f = state.funciones.find((x) => x.id === id);
+    if (!f) return;
+    const r = state.finanzas[id] || {};
+    abrirModal(`
+      <div class="modal-cab">
+        <div><h2>💰 Recaudación</h2><div class="sub">${esc(f.ciudad)} · ${esc(fechaCorta(f.fecha))} · 🔒 solo vos</div></div>
+        <button class="btn-icono" data-action="volverFuncion" data-id="${f.id}" aria-label="Volver">✕</button>
+      </div>
+      <form data-form="finanzas" data-id="${f.id}" novalidate>
+        <div class="fila-2">
+          <label class="campo"><span>Recaudación ($)</span><input type="number" name="recaudacion" min="0" step="any" inputmode="decimal" value="${esc(r.recaudacion)}"></label>
+          <label class="campo"><span>Gastos ($)</span><input type="number" name="gastos" min="0" step="any" inputmode="decimal" value="${esc(r.gastos)}"></label>
+        </div>
+        <label class="campo"><span>Notas</span><textarea name="notas" placeholder="Ej: 70/30 con el teatro, se cobra a 15 días">${esc(r.notas)}</textarea></label>
+        <p class="small muted">Estos datos están protegidos en la base: tu equipo no puede verlos.</p>
+        <p class="error" id="form-error" hidden></p>
+        <button class="btn primario bloque" type="submit">Guardar</button>
+      </form>`);
+  }
+
+  async function guardarFinanzas(form) {
+    const fd = new FormData(form);
+    const datos = { funcion_id: form.dataset.id, recaudacion: dinero(fd.get('recaudacion')), gastos: dinero(fd.get('gastos')),
+      notas: String(fd.get('notas') || '').trim() || null };
+    if ([datos.recaudacion, datos.gastos].some((v) => v != null && (isNaN(v) || v < 0))) return errorForm('Revisá los números.');
+    await guardar(form, sb.from('finanzas').upsert(datos), async () => { await cargarDatos(); verFuncion(datos.funcion_id); });
   }
 
   function vistaCalendario() {
@@ -418,7 +529,7 @@
       <button data-action="calModo" data-modo="mes" class="${state.calModo === 'mes' ? 'activo' : ''}">Mes</button>
       <button data-action="calModo" data-modo="lista" class="${state.calModo === 'lista' ? 'activo' : ''}">Lista</button>
     </div>`;
-    return seg + bannerCierre() + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
+    return seg + bannerRecordatorios() + bannerCierre() + bannerAvisos() + (state.calModo === 'mes' ? vistaMes() : vistaLista());
   }
 
   function leyenda() {
@@ -592,6 +703,8 @@
 
       <h3 class="sub-titulo">🎟️ Entradas</h3>
       ${entradasHtml(f, t)}
+
+      ${state.isAdmin ? `<h3 class="sub-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></h3>${finanzasHtml(f)}` : ''}
 
       <h3 class="sub-titulo">🚐 Logística</h3>
       ${logistica ? `<div class="datos">${logistica}</div>`
@@ -1063,14 +1176,15 @@
   }
 
   // ---------- Estadísticas ----------
-  function barras(filas, { pct = false } = {}) {
+  function barras(filas, { pct = false, plata: esPlata = false } = {}) {
+    const fmt = (v) => (pct ? v + '%' : esPlata ? plata(v) : numero(v));
     if (!filas.length) return '<div class="vacio-msg chico">Sin datos todavía.</div>';
     const max = Math.max(...filas.map((f) => f.valor), 1);
     return `<div class="barras">${filas.map((f) => `
-      <div class="barra-fila" title="${esc(f.nombre)}: ${pct ? f.valor + '%' : numero(f.valor)}">
+      <div class="barra-fila" title="${esc(f.nombre)}: ${fmt(f.valor)}">
         <div class="barra-nombre">${esc(f.nombre)}${f.sub ? `<span>${esc(f.sub)}</span>` : ''}</div>
         <div class="barra-pista"><div class="barra-valor" style="width:${Math.max(2, f.valor * 100 / (pct ? Math.max(100, max) : max))}%"></div></div>
-        <div class="barra-num">${pct ? f.valor + '%' : numero(f.valor)}</div>
+        <div class="barra-num">${fmt(f.valor)}</div>
       </div>`).join('')}</div>`;
   }
 
@@ -1132,6 +1246,7 @@
       </div>
       <p class="small muted">Próximamente: ${proximas} confirmada(s) y ${opciones} opción(es).
         ${hechas.length > conPub.length ? ` · ${hechas.length - conPub.length} función(es) realizada(s) sin público cargado.` : ''}</p>
+      ${state.isAdmin ? statsPlata(enRango) : ''}
       <div class="seccion-titulo">Público por provincia</div>
       ${barras(filasProv)}
       <div class="seccion-titulo">Teatros con mejor ocupación</div>
@@ -1140,6 +1255,30 @@
       ${barras(filasMes)}
       ${!hechas.length ? `<div class="vacio-msg" style="margin-top:14px">Las estadísticas se arman con las funciones <b>Realizadas</b>.
         Después de cada show usá “🎬 Cerrar función” para cargar cuánta gente vino.</div>` : ''}`;
+  }
+
+  function statsPlata(enRango) {
+    const filas = state.funciones.filter((f) => enRango(f) && f.estado !== 'cancelada' && state.finanzas[f.id]?.recaudacion != null);
+    if (!filas.length) {
+      return `<div class="seccion-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></div>
+        <div class="vacio-msg chico">Todavía no cargaste recaudación. Se carga al cerrar cada función.</div>`;
+    }
+    const rec = filas.reduce((a, f) => a + Number(state.finanzas[f.id].recaudacion), 0);
+    const gas = filas.reduce((a, f) => a + Number(state.finanzas[f.id].gastos || 0), 0);
+    const porMes = {};
+    filas.forEach((f) => { const k = f.fecha.slice(0, 7); porMes[k] = (porMes[k] || 0) + Number(state.finanzas[f.id].recaudacion); });
+    const filasMes = Object.keys(porMes).sort().map((k) => {
+      const [y, m] = k.split('-').map(Number);
+      return { nombre: `${capitalizar(MESES[m - 1].slice(0, 3))} ${y}`, valor: Math.round(porMes[k]) };
+    });
+    return `<div class="seccion-titulo">💰 Recaudación <span class="solo-vos">🔒 solo vos</span></div>
+      <div class="tiles privado">
+        <div class="tile"><b>${plata(rec)}</b><span>recaudación total</span></div>
+        <div class="tile"><b>${plata(rec - gas)}</b><span>neto (menos gastos)</span></div>
+        <div class="tile"><b>${plata(rec / filas.length)}</b><span>promedio por función</span></div>
+        <div class="tile"><b>${numero(filas.length)}</b><span>funciones con datos</span></div>
+      </div>
+      ${barras(filasMes, { plata: true })}`;
   }
 
   // ---------- Teatros ----------
@@ -1439,6 +1578,8 @@
     dia: (el) => { state.diaSel = state.diaSel === el.dataset.dia ? null : el.dataset.dia; renderMain(); },
     verAvisos: () => verAvisos(),
     verPendientes: () => verPendientes(),
+    verRecordatorios: () => verRecordatorios(),
+    editarFinanzas: (el) => formFinanzas(el.dataset.id),
     cerrarFuncion: (el) => formCierre(el.dataset.id),
     verFuncion: (el, e) => { e.preventDefault(); verFuncion(el.dataset.id); },
     volverFuncion: (el) => verFuncion(el.dataset.id),
@@ -1532,6 +1673,8 @@
         if (error) renderLogin(traducirError(error));
       } else if (tipo === 'funcion') {
         await guardarFuncion(form);
+      } else if (tipo === 'finanzas') {
+        await guardarFinanzas(form);
       } else if (tipo === 'cierre') {
         await guardarCierre(form);
       } else if (tipo === 'teatro') {

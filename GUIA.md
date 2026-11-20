@@ -40,6 +40,11 @@ Agrega logística, checklist, entradas, ubicaciones para el mapa y el espacio pa
 Agrega asistentes, invitaciones y comentario de cierre.
 Igual que antes: copiá [`supabase/actualizacion-3.sql`](supabase/actualizacion-3.sql), pegalo en una hoja nueva del SQL Editor y tocá **Run**.
 
+## Paso 2.8 · Actualización para recaudación (versión 4)
+
+Crea la tabla de recaudación, protegida para que solo los administradores la vean.
+Copiá [`supabase/actualizacion-4.sql`](supabase/actualizacion-4.sql), pegalo en una hoja nueva del SQL Editor y tocá **Run**.
+
 ## Paso 3 · Crear los usuarios (vos y tu equipo)
 
 1. Menú izquierdo → **Authentication** → **Users** → botón **Add user** → **Create new user**.

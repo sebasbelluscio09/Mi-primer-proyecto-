@@ -314,3 +314,12 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .barra-valor { height: 100%; background: var(--primary); border-radius: 0 4px 4px 0; }
 .barra-num { font-size: 14px; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
 .tabbar button { font-size: 11px; }
+
+/* ---------- Recaudación y recordatorios ---------- */
+.solo-vos { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 2px 8px; vertical-align: middle; }
+.panel.privado, .datos.privado { border-style: dashed; }
+.tiles.privado .tile { border-style: dashed; }
+.tiles.privado .tile b { font-size: 20px; }
+.aviso-banner.recordatorio { border-color: var(--primary); background: var(--surface); }
+.faltan { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
+.aviso-box .card { box-shadow: none; }

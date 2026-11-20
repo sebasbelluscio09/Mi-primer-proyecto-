@@ -11,6 +11,8 @@ App web (pensada para el celular) para organizar las giras nacionales de un espe
 - **Por función:** logística (traslado, hotel, prueba de sonido), checklist técnico, entradas vendidas vs. capacidad y documentos adjuntos.
 - **Historial por teatro:** cuántas veces fuimos y cuánta gente vino.
 - **Cierre de función:** después de cada show se carga el público real; al programar una fecha se ve cómo fue la última vez.
+- **Recaudación y gastos por función**, visibles solo para administradores (protegidos en la base de datos).
+- **Recordatorios:** funciones de los próximos 7 días con cosas pendientes.
 - **Números:** estadísticas de público por provincia, por mes y teatros con mejor ocupación.
 - **Exportar** a Google Calendar / iPhone y **compartir por WhatsApp**.
 
@@ -30,3 +32,4 @@ Hecha con HTML/CSS/JavaScript, sin compilación. Publicada en GitHub Pages con b
 | `supabase/instalar.sql` | Lo mismo, sin comentarios (para pegar desde el celular) |
 | `supabase/actualizacion-2.sql` | Actualización para los extras (versión 2) |
 | `supabase/actualizacion-3.sql` | Actualización para cierre de funciones (versión 3) |
+| `supabase/actualizacion-4.sql` | Recaudación solo para administradores (versión 4) |
