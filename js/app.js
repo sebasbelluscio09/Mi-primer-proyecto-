@@ -373,9 +373,9 @@
       ${error ? `<p class="error">${esc(error)}</p>` : ''}
       <form data-form="login" novalidate>
         <label class="campo"><span>Email</span>
-          <input type="email" name="email" autocomplete="email" inputmode="email" required></label>
+          <input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" required></label>
         <label class="campo"><span>Contraseña</span>
-          <input type="password" name="password" autocomplete="current-password" required></label>
+          <input type="password" name="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" required></label>
         <button class="btn primario bloque" type="submit">Entrar</button>
       </form>
       <p class="small muted" style="text-align:center;margin:18px 0 0">
@@ -1850,8 +1850,8 @@
     const tipo = form.dataset.form;
     try {
       if (tipo === 'login') {
-        const email = form.email.value.trim();
-        const password = form.password.value;
+        const email = form.email.value.trim().toLowerCase();
+        const password = form.password.value.trim();
         if (!email || !password) return renderLogin('Completá email y contraseña.');
         const btn = form.querySelector('[type=submit]');
         btn.disabled = true; btn.textContent = 'Entrando…';

@@ -31,7 +31,7 @@ Desde el contenedor de Claude **no hay acceso de red a Supabase** (proxy 403): n
 - `@supabase/supabase-js@2.117.3` (UMD desde jsDelivr). Leaflet 1.9.4 desde unpkg (se carga solo al abrir el Mapa). Mapas de OpenStreetMap. Geocodificación con Nominatim (solo al guardar teatros).
 - Ingreso con **email + contraseña** (no magic link: el SMTP gratuito de Supabase no manda a externos). El admin crea usuarios en Supabase → Add user → "Auto Confirm User". **Registro público desactivado** ("Allow new users to sign up" apagado).
 - Roles: tabla `admins(email)` + función `es_admin()`. Todo usuario logueado lee; solo admin escribe (RLS en todas las tablas).
-- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=8`).
+- **Cache de Safari**: GitHub Pages cachea ~10 min. En cada cambio de CSS/JS **subí el número `?v=N` en `index.html`** (hoy `v=9`).
 
 ### Base de datos (Supabase)
 
